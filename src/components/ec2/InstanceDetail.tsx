@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,10 +66,46 @@ function formatDateTime(value?: string) {
 export function InstanceDetail({
   instance,
   region,
+  role = "user",
 }: {
   instance: Ec2Instance;
   region: string | null;
+  role?: "admin" | "user";
 }) {
+  const [actionLoading, setActionLoading] = useState<"start" | "stop" | "reboot" | "terminate" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  async function runInstanceAction(action: "start" | "stop" | "reboot" | "terminate") {
+    if (action === "terminate") {
+      const ok = window.confirm(
+        `Terminate instance ${instance.InstanceId}? This may permanently delete the instance.`,
+      );
+      if (!ok) return;
+    }
+    setActionLoading(action);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      const res = await fetch("/api/ec2/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          instanceId: instance.InstanceId,
+          region,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to run action");
+      setActionSuccess(`Instance ${action} request submitted.`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to run action");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   const statusQuery = useQuery<InstanceStatusData>({
     queryKey: ["ec2-status", instance.InstanceId, region],
     queryFn: () => fetch(`/api/ec2/status?instanceId=${instance.InstanceId}&region=${region}`).then(res => res.json()),
@@ -152,20 +189,55 @@ export function InstanceDetail({
           </div>
 
           {/* Action buttons */}
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-2">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              Manage
-            </Button>
+          <div className="flex flex-col items-end gap-2">
+            {role === "admin" && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => runInstanceAction("start")}
+                  disabled={actionLoading !== null}
+                >
+                  {actionLoading === "start" ? "Starting..." : "Start"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => runInstanceAction("stop")}
+                  disabled={actionLoading !== null}
+                >
+                  {actionLoading === "stop" ? "Stopping..." : "Stop"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => runInstanceAction("reboot")}
+                  disabled={actionLoading !== null}
+                >
+                  {actionLoading === "reboot" ? "Rebooting..." : "Reboot"}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => runInstanceAction("terminate")}
+                  disabled={actionLoading !== null}
+                >
+                  {actionLoading === "terminate" ? "Terminating..." : "Terminate"}
+                </Button>
+              </div>
+            )}
             <Button variant="outline" size="sm" className="gap-2">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               Connect
             </Button>
+            {actionError && (
+              <p className="text-xs text-destructive">{actionError}</p>
+            )}
+            {actionSuccess && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">{actionSuccess}</p>
+            )}
           </div>
         </div>
       </div>
