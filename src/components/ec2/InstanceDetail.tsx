@@ -259,7 +259,7 @@ export function InstanceDetail({
                   </TableHeader>
                   <TableBody>
                     {statusQuery.data.status.Events.map((e: any, i: number) => (
-                      <TableRow key={i}>
+                      <TableRow key={`${e.Code}-${e.NotBefore}-${i}`}>
                         <TableCell>{e.Code}</TableCell>
                         <TableCell>{e.Description}</TableCell>
                         <TableCell>{e.NotBefore}</TableCell>
@@ -410,10 +410,10 @@ export function InstanceDetail({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {instance.BlockDeviceMappings.map((b) => {
+                    {instance.BlockDeviceMappings.map((b, idx) => {
                       const v = volumesQuery.data?.volumes.find((x) => x.VolumeId === b.VolumeId);
                       return (
-                        <TableRow key={b.DeviceName}>
+                        <TableRow key={b.VolumeId || `device-${idx}`}>
                           <TableCell className="font-mono">{b.DeviceName}</TableCell>
                           <TableCell className="font-mono">{b.VolumeId ?? "–"}</TableCell>
                           <TableCell>{v?.Size ?? "–"}</TableCell>
@@ -438,8 +438,8 @@ export function InstanceDetail({
           </TabsContent>
 
           <TabsContent value="tags" className="mt-0">
-            <Section title={`Tags (${instance.Tags.length})`}>
-              {instance.Tags.length ? (
+            <Section title={`Tags (${instance.Tags?.length ?? 0})`}>
+              {instance.Tags?.length ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -522,8 +522,9 @@ function SgRulesTable({
                 : `${r.FromPort ?? 0} – ${r.ToPort ?? 0}`;
           const target =
             r.CidrIpv4 ?? r.CidrIpv6 ?? r.ReferencedGroupId ?? r.PrefixListId ?? "–";
+          const ruleKey = `${r.GroupId}-${r.IpProtocol}-${r.FromPort}-${r.ToPort}-${target}-${i}`;
           return (
-            <TableRow key={i}>
+            <TableRow key={ruleKey}>
               <TableCell className="font-mono text-xs">{r.GroupId}</TableCell>
               <TableCell>{r.IpProtocol}</TableCell>
               <TableCell>{port}</TableCell>

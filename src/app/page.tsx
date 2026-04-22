@@ -26,7 +26,7 @@ function Index() {
     staleTime: Infinity,
   });
 
-  const [region, setRegion] = useState<string | null>(null);
+  const [region, setRegion] = useState<string>("");
   useEffect(() => {
     if (!region && regionsQuery.data?.default) setRegion(regionsQuery.data.default);
   }, [region, regionsQuery.data?.default]);
@@ -34,7 +34,7 @@ function Index() {
   const { data, isLoading, isFetching, refetch } = useQuery<{ instances: Ec2Instance[], error: string | null, region: string | null }>({
     queryKey: ["ec2-instances", region],
     queryFn: () => fetch(`/api/ec2/instances?region=${region}`).then(res => res.json()),
-    enabled: !!region,
+    enabled: !!region && region !== "",
   });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -94,7 +94,7 @@ function Index() {
             </div>
 
             {/* Region selector */}
-            <Select value={region ?? undefined} onValueChange={(v) => { setRegion(v); setSelectedId(null); }}>
+            <Select value={region} onValueChange={(v) => { setRegion(v); setSelectedId(null); }}>
               <SelectTrigger className="h-9 w-64 border-white/20 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 focus:ring-aws-orange">
                 <SelectValue placeholder="Select region" />
               </SelectTrigger>

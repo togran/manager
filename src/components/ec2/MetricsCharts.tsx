@@ -46,6 +46,10 @@ function Chart({
     Average: p.Average,
     value: formatter ? formatter(p.Sum) : p.Sum,
   }));
+  
+  // Show dots when there are few data points
+  const showDots = series.length <= 10;
+
   return (
     <div className="rounded-lg border border-border bg-panel p-4">
       <div className="mb-3 flex items-baseline justify-between">
@@ -61,7 +65,14 @@ function Chart({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={series} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="time" stroke="var(--color-muted-foreground)" fontSize={11} />
+              <XAxis 
+                dataKey="time" 
+                stroke="var(--color-muted-foreground)" 
+                fontSize={11}
+                angle={series.length > 8 ? -45 : 0}
+                textAnchor={series.length > 8 ? "end" : "middle"}
+                height={series.length > 8 ? 60 : 30}
+              />
               <YAxis stroke="var(--color-muted-foreground)" fontSize={11} />
               <Tooltip
                 contentStyle={{
@@ -72,16 +83,23 @@ function Chart({
                 }}
               />
               <Line
-                type="monotone"
+                type="linear"
                 dataKey={dataKey}
                 stroke={color}
-                strokeWidth={2}
-                dot={false}
+                strokeWidth={2.5}
+                dot={showDots ? { r: 4, fill: color } : false}
+                activeDot={{ r: 6 }}
+                isAnimationActive={false}
               />
             </LineChart>
           </ResponsiveContainer>
         )}
       </div>
+      {series.length > 0 && (
+        <div className="mt-2 text-xs text-muted-foreground">
+          {series.length} point{series.length !== 1 ? 's' : ''}
+        </div>
+      )}
     </div>
   );
 }
@@ -108,18 +126,43 @@ export function MetricsCharts({ instanceId, region }: { instanceId: string; regi
     return <p className="text-sm text-destructive">{(error as Error).message}</p>;
   }
   if (data?.error) {
-    return <p className="text-sm text-destructive">{data.error}</p>;
+    return (
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+        <p className="text-sm text-destructive">{data.error}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          💡 Tip: Make sure the instance has monitoring enabled and has been running for at least a few minutes.
+        </p>
+      </div>
+    );
   }
+
+  const noCPUData = !data?.cpu || data.cpu.length === 0;
+  const noNetData = !data?.netIn || data.netIn.length === 0;
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <Chart
-        title="CPU Utilization"
-        unit="Percent (avg)"
-        data={data?.cpu ?? []}
-        dataKey="Average"
-        color="var(--color-aws-orange)"
-      />
+      {noCPUData ? (
+        <div className="rounded-lg border border-border bg-panel p-4">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h4 className="text-sm font-semibold text-foreground">CPU Utilization</h4>
+            <span className="text-xs text-muted-foreground">Percent (avg)</span>
+          </div>
+          <div className="flex h-48 items-center justify-center">
+            <div className="text-center">
+              <p className="text-xs text-muted-foreground">No CPU metrics available</p>
+              <p className="mt-1 text-xs text-muted-foreground/70">Enable detailed monitoring in EC2 console</p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <Chart
+          title="CPU Utilization"
+          unit="Percent (avg)"
+          data={data?.cpu ?? []}
+          dataKey="Average"
+          color="var(--color-aws-orange)"
+        />
+      )}
       <Chart
         title="Network In"
         unit="MB / 5 min"

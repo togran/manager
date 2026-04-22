@@ -32,25 +32,37 @@ async function getMetric(
     'Dimensions.member.1.Value': instanceId,
   };
 
-  const signed = await signEc2Request(params, { service: 'monitoring', region });
-  const res = await fetch(signed.url, {
-    method: signed.method,
-    headers: signed.headers,
-    body: signed.body,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`CloudWatch ${metricName} ${res.status}: ${text.slice(0, 200)}`);
+  try {
+    const signed = await signEc2Request(params, { service: 'monitoring', region });
+    const res = await fetch(signed.url, {
+      method: signed.method,
+      headers: signed.headers,
+      body: signed.body,
+    });
+    const text = await res.text();
+    
+    if (!res.ok) {
+      console.error(`❌ CloudWatch ${metricName} error:`, text.slice(0, 500));
+      throw new Error(`CloudWatch ${metricName} ${res.status}: ${text.slice(0, 200)}`);
+    }
+    
+    const parser = new XMLParser({ ignoreAttributes: true });
+    const obj = parser.parse(text);
+    const datapoints = toArray(obj?.GetMetricStatisticsResponse?.GetMetricStatisticsResult?.Datapoints?.member);
+    
+    console.log(`✅ ${metricName}: ${datapoints.length} datapoints from CloudWatch`);
+    
+    return datapoints
+      .map((p: any) => ({
+        Timestamp: String(p.Timestamp),
+        Average: Number(p.Average ?? 0),
+        Sum: Number(p.Sum ?? 0),
+      }))
+      .sort((a, b) => a.Timestamp.localeCompare(b.Timestamp));
+  } catch (err: any) {
+    console.error(`❌ getMetric(${metricName}) failed:`, err.message);
+    throw err;
   }
-  const parser = new XMLParser({ ignoreAttributes: true });
-  const obj = parser.parse(text);
-  return toArray(obj?.GetMetricStatisticsResponse?.GetMetricStatisticsResult?.Datapoints?.member)
-    .map((p: any) => ({
-      Timestamp: String(p.Timestamp),
-      Average: Number(p.Average ?? 0),
-      Sum: Number(p.Sum ?? 0),
-    }))
-    .sort((a, b) => a.Timestamp.localeCompare(b.Timestamp));
 }
 
 export async function GET(request: NextRequest) {
@@ -67,15 +79,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ cpu: [], netIn: [], netOut: [], error: 'AWS_REGION not configured' });
   }
 
+  console.log(`📊 Fetching metrics for ${instanceId} in ${finalRegion}`);
+
   try {
     const [cpu, netIn, netOut] = await Promise.all([
-      getMetric(finalRegion, instanceId, 'CPUUtilization', 'Average'),
-      getMetric(finalRegion, instanceId, 'NetworkIn', 'Sum'),
-      getMetric(finalRegion, instanceId, 'NetworkOut', 'Sum'),
+      getMetric(finalRegion, instanceId, 'CPUUtilization', 'Average').catch((e) => {
+        console.error(`❌ CPUUtilization failed:`, e.message);
+        return [];
+      }),
+      getMetric(finalRegion, instanceId, 'NetworkIn', 'Sum').catch((e) => {
+        console.error(`❌ NetworkIn failed:`, e.message);
+        return [];
+      }),
+      getMetric(finalRegion, instanceId, 'NetworkOut', 'Sum').catch((e) => {
+        console.error(`❌ NetworkOut failed:`, e.message);
+        return [];
+      }),
     ]);
+    
+    console.log(`✅ Metrics collected: CPU=${cpu.length}, NetIn=${netIn.length}, NetOut=${netOut.length}`);
+    
     return NextResponse.json({ cpu, netIn, netOut, error: null });
   } catch (e: any) {
-    console.error('getInstanceMetrics failed:', e);
+    console.error('❌ getInstanceMetrics failed:', e);
     return NextResponse.json({
       cpu: [] as MetricPoint[],
       netIn: [] as MetricPoint[],
