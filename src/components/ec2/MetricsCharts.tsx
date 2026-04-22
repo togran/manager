@@ -65,8 +65,8 @@ function Chart({
 }) {
   const series = data.map((p) => ({
     time: formatTime(p.Timestamp),
-    Average: p.Average,
-    value: formatter ? formatter(p.Sum) : p.Sum,
+    Average: Number.isFinite(p.Average) ? p.Average : 0,
+    value: Number.isFinite(p.Sum) ? (formatter ? formatter(p.Sum) : p.Sum) : 0,
   }));
   
   // Show dots when there are few data points
@@ -106,6 +106,7 @@ function Chart({
                 dataKey={dataKey}
                 stroke={color}
                 strokeWidth={2.5}
+                connectNulls
                 dot={showDots ? { r: 4, fill: color } : false}
                 activeDot={{ r: 6 }}
                 isAnimationActive={false}
@@ -179,7 +180,7 @@ export function MetricsCharts({ instanceId, region }: { instanceId: string; regi
           unit="Percent (avg)"
           data={data?.cpu ?? []}
           dataKey="Average"
-          color="var(--color-aws-orange)"
+          color="#f59e0b"
         />
       )}
       <Chart
