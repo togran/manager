@@ -11,6 +11,20 @@ import {
   CartesianGrid,
 } from "recharts";
 
+function GraphTooltipCard({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const time = label;
+  const value = payload[0]?.value;
+  return (
+    <div className="rounded-lg border border-[#e5e7eb] bg-white p-3 shadow-lg min-w-[140px]">
+      <div className="mb-1 text-xs font-semibold text-slate-500">Time</div>
+      <div className="mb-2 text-sm font-mono text-[#111827]">{time}</div>
+      <div className="mb-1 text-xs font-semibold text-slate-500">Value</div>
+      <div className="text-base font-bold text-[#111827]">{value}</div>
+    </div>
+  );
+}
+
 export interface MetricPoint {
   Timestamp: string;
   Average: number;
@@ -74,14 +88,7 @@ function Chart({
                 height={series.length > 8 ? 60 : 30}
               />
               <YAxis stroke="var(--color-muted-foreground)" fontSize={11} />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--color-popover)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: 6,
-                  fontSize: 12,
-                }}
-              />
+              <Tooltip content={<GraphTooltipCard />} cursor={{ fill: '#f3f4f6' }} />
               <Line
                 type="linear"
                 dataKey={dataKey}

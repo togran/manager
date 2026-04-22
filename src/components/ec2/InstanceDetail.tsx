@@ -188,24 +188,53 @@ export function InstanceDetail({
 
         <div className="flex-1 overflow-auto bg-background p-6">
           <TabsContent value="details" className="mt-0">
-            <Section title="Instance summary">
-              <FieldGrid>
-                <Field label="Instance ID" value={<span className="font-mono">{instance.InstanceId}</span>} />
-                <Field label="Public IPv4 address" value={instance.PublicIpAddress} />
-                <Field label="Private IPv4 addresses" value={instance.PrivateIpAddress} />
-                <Field label="IPv6 address" value={null} />
-                <Field label="Instance state" value={<StateBadge state={instance.State} />} />
-                <Field label="Public IPv4 DNS" value={instance.PublicDnsName} />
-                <Field label="Hostname type" value={instance.PrivateDnsName} />
-                <Field label="Private IP DNS name (IPv4 only)" value={instance.PrivateDnsName} />
-                <Field label="Instance type" value={instance.InstanceType} />
-                <Field label="Elastic IP addresses" value={null} />
-                <Field label="VPC ID" value={instance.VpcId} />
-                <Field label="Subnet ID" value={instance.SubnetId} />
-                <Field label="IAM Role" value={instance.IamInstanceProfile} />
-                <Field label="Key pair name" value={instance.KeyName} />
-                <Field label="Launch time" value={instance.LaunchTime} />
-              </FieldGrid>
+            <Section title="Instance Details">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {/* Instance Name */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Instance Name</span>
+                  <span className="text-base font-semibold text-foreground">{instance.Name || (instance.Tags?.find(t => t.Key === "Name")?.Value ?? "-")}</span>
+                </div>
+                {/* Instance ID */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Instance ID</span>
+                  <span className="font-mono text-base text-foreground">{instance.InstanceId}</span>
+                </div>
+                {/* Instance Type */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Instance Type</span>
+                  <span className="text-base text-foreground">{instance.InstanceType}</span>
+                </div>
+                {/* Public IP */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Public IP</span>
+                  <span className="text-base text-foreground">{instance.PublicIpAddress || "-"}</span>
+                </div>
+                {/* Private IP */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Private IP</span>
+                  <span className="text-base text-foreground">{instance.PrivateIpAddress || "-"}</span>
+                </div>
+                {/* Region */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Region</span>
+                  <span className="text-base text-foreground">{region || "-"}</span>
+                </div>
+                {/* Availability Zone */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">Availability Zone</span>
+                  <span className="text-base text-foreground">{instance.AvailabilityZone || "-"}</span>
+                </div>
+                {/* Security Groups */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 col-span-1 md:col-span-2 xl:col-span-3 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Security Groups</span>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {instance.SecurityGroups?.length ? instance.SecurityGroups.map((sg) => (
+                      <span key={sg.GroupId} className="inline-block rounded bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-mono text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700">{sg.GroupName} <span className="text-slate-400">({sg.GroupId})</span></span>
+                    )) : <span className="text-muted-foreground">-</span>}
+                  </div>
+                </div>
+              </div>
             </Section>
             <Section title="Host and placement group">
               <FieldGrid>
