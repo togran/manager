@@ -55,6 +55,13 @@ type VolumesQueryData = {
   error: string | null;
 };
 
+function formatDateTime(value?: string) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
 export function InstanceDetail({
   instance,
   region,
@@ -219,6 +226,56 @@ export function InstanceDetail({
                 <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
                   <span className="text-xs font-medium text-muted-foreground">Region</span>
                   <span className="text-base text-foreground">{region || "-"}</span>
+                </div>
+                {/* Launch Time */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Launch Time</span>
+                  <span className="text-base text-foreground">{formatDateTime(instance.LaunchTime)}</span>
+                </div>
+                {/* Key Pair */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Key Pair</span>
+                  <span className="text-base text-foreground">{instance.KeyName || "-"}</span>
+                </div>
+                {/* Monitoring */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Monitoring</span>
+                  <span className="text-base text-foreground">
+                    {instance.Monitoring === "enabled" ? "Detailed enabled" : "Basic"}
+                  </span>
+                </div>
+                {/* VPC ID */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">VPC ID</span>
+                  <span className="font-mono text-base text-foreground">{instance.VpcId || "-"}</span>
+                </div>
+                {/* Subnet ID */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Subnet ID</span>
+                  <span className="font-mono text-base text-foreground">{instance.SubnetId || "-"}</span>
+                </div>
+                {/* Public DNS */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Public DNS</span>
+                  <span className="text-base text-foreground break-all">{instance.PublicDnsName || "-"}</span>
+                </div>
+                {/* Private DNS */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Private DNS</span>
+                  <span className="text-base text-foreground break-all">{instance.PrivateDnsName || "-"}</span>
+                </div>
+                {/* IAM Instance Profile */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">IAM Role / Profile</span>
+                  <span className="text-base text-foreground break-all">{instance.IamInstanceProfile || "-"}</span>
+                </div>
+                {/* Resource counts */}
+                <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-aws-orange/60">
+                  <span className="text-xs font-medium text-muted-foreground">Attached Resources</span>
+                  <span className="text-base text-foreground">
+                    {instance.NetworkInterfaces.length} NICs · {instance.BlockDeviceMappings.length} volumes ·{" "}
+                    {instance.SecurityGroups.length} security groups
+                  </span>
                 </div>
                 {/* Availability Zone */}
                 <div className="rounded-lg border border-border bg-white dark:bg-slate-900 p-4 shadow-sm flex flex-col gap-2">
