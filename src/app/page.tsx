@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +22,13 @@ import type { AwsRegion, Ec2Instance } from "@/types/ec2";
 export const dynamic = 'force-dynamic';
 
 function Index() {
+  const router = useRouter();
+  const meQuery = useQuery<{ user: { id: number; username: string; role: "admin" | "user" } | null }>({
+    queryKey: ["auth-me"],
+    queryFn: () => fetch("/api/auth/me").then((res) => res.json()),
+    retry: false,
+  });
+
   const regionsQuery = useQuery<{ regions: AwsRegion[], default: string | null }>({
     queryKey: ["aws-regions"],
     queryFn: () => fetch('/api/ec2/regions').then(res => res.json()),
@@ -56,6 +65,12 @@ function Index() {
   const selected =
     instances.find((i) => i.InstanceId === selectedId) ?? filtered[0] ?? null;
 
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
       <header className="relative overflow-hidden border-b border-slate-200/50 bg-gradient-to-r from-aws-navy via-aws-navy to-slate-800 shadow-lg dark:border-slate-700/50">
@@ -87,6 +102,28 @@ function Index() {
           </div>
 
           <div className="flex items-center gap-4">
+            {meQuery.data?.user && (
+              <div className="hidden items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 text-xs text-white sm:flex">
+                <span>{meQuery.data.user.username}</span>
+                <span className="rounded bg-white/20 px-1.5 py-0.5 uppercase">{meQuery.data.user.role}</span>
+              </div>
+            )}
+            {meQuery.data?.user?.role === "admin" && (
+              <Link
+                href="/admin/users"
+                className="rounded-md border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/20"
+              >
+                Admin Panel
+              </Link>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={logout}
+              className="h-9 border-white/30 bg-white/10 text-white hover:bg-white/20"
+            >
+              Logout
+            </Button>
             {/* Status indicator */}
             <div className="hidden items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5 backdrop-blur-sm sm:flex">
               <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse"></div>
@@ -254,7 +291,11 @@ function Index() {
         </div>
         <div className="flex-1">
           {selected ? (
-            <InstanceDetail instance={selected} region={data?.region ?? null} />
+            <InstanceDetail
+              instance={selected}
+              region={data?.region ?? null}
+              role={meQuery.data?.user?.role ?? "user"}
+            />
           ) : (
             <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-50/50 to-slate-100/50 dark:from-slate-800/50 dark:to-slate-900/50">
               <div className="max-w-md text-center">

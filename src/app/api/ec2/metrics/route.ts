@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { XMLParser } from 'fast-xml-parser';
-import { signEc2Request } from '@/server/aws-sigv4';
-
-const toArray = <T>(v: T | T[] | undefined): T[] =>
-  v === undefined || v === null ? [] : Array.isArray(v) ? v : [v];
+import { GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
+import { createCloudWatchClient } from "@/lib/aws";
+import { requireSession } from "@/lib/auth";
 
 interface MetricPoint {
   Timestamp: string;
@@ -12,6 +10,7 @@ interface MetricPoint {
 }
 
 async function getMetric(
+  role: "admin" | "user",
   region: string,
   instanceId: string,
   metricName: string,
@@ -19,53 +18,32 @@ async function getMetric(
 ): Promise<MetricPoint[]> {
   const end = new Date();
   const start = new Date(end.getTime() - 3 * 60 * 60 * 1000); // last 3h
-  const params: Record<string, string> = {
-    Action: 'GetMetricStatistics',
-    Version: '2010-08-01',
-    Namespace: 'AWS/EC2',
-    MetricName: metricName,
-    StartTime: start.toISOString(),
-    EndTime: end.toISOString(),
-    Period: '300',
-    'Statistics.member.1': statistic,
-    'Dimensions.member.1.Name': 'InstanceId',
-    'Dimensions.member.1.Value': instanceId,
-  };
+  const client = await createCloudWatchClient(role, region);
+  const result = await client.send(
+    new GetMetricStatisticsCommand({
+      Namespace: "AWS/EC2",
+      MetricName: metricName,
+      StartTime: start,
+      EndTime: end,
+      Period: 300,
+      Statistics: [statistic],
+      Dimensions: [{ Name: "InstanceId", Value: instanceId }],
+    }),
+  );
 
-  try {
-    const signed = await signEc2Request(params, { service: 'monitoring', region });
-    const res = await fetch(signed.url, {
-      method: signed.method,
-      headers: signed.headers,
-      body: signed.body,
-    });
-    const text = await res.text();
-    
-    if (!res.ok) {
-      console.error(`❌ CloudWatch ${metricName} error:`, text.slice(0, 500));
-      throw new Error(`CloudWatch ${metricName} ${res.status}: ${text.slice(0, 200)}`);
-    }
-    
-    const parser = new XMLParser({ ignoreAttributes: true });
-    const obj = parser.parse(text);
-    const datapoints = toArray(obj?.GetMetricStatisticsResponse?.GetMetricStatisticsResult?.Datapoints?.member);
-    
-    console.log(`✅ ${metricName}: ${datapoints.length} datapoints from CloudWatch`);
-    
-    return datapoints
-      .map((p: any) => ({
-        Timestamp: String(p.Timestamp),
-        Average: Number(p.Average ?? 0),
-        Sum: Number(p.Sum ?? 0),
-      }))
-      .sort((a, b) => a.Timestamp.localeCompare(b.Timestamp));
-  } catch (err: any) {
-    console.error(`❌ getMetric(${metricName}) failed:`, err.message);
-    throw err;
-  }
+  return (result.Datapoints ?? [])
+    .map((p) => ({
+      Timestamp: p.Timestamp?.toISOString() ?? "",
+      Average: Number(p.Average ?? 0),
+      Sum: Number(p.Sum ?? 0),
+    }))
+    .sort((a, b) => a.Timestamp.localeCompare(b.Timestamp));
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireSession(request);
+  if (auth.error) return auth.error;
+
   const { searchParams } = new URL(request.url);
   const instanceId = searchParams.get('instanceId');
   const region = searchParams.get('region');
@@ -83,15 +61,15 @@ export async function GET(request: NextRequest) {
 
   try {
     const [cpu, netIn, netOut] = await Promise.all([
-      getMetric(finalRegion, instanceId, 'CPUUtilization', 'Average').catch((e) => {
+      getMetric(auth.session.role, finalRegion, instanceId, 'CPUUtilization', 'Average').catch((e) => {
         console.error(`❌ CPUUtilization failed:`, e.message);
         return [];
       }),
-      getMetric(finalRegion, instanceId, 'NetworkIn', 'Sum').catch((e) => {
+      getMetric(auth.session.role, finalRegion, instanceId, 'NetworkIn', 'Sum').catch((e) => {
         console.error(`❌ NetworkIn failed:`, e.message);
         return [];
       }),
-      getMetric(finalRegion, instanceId, 'NetworkOut', 'Sum').catch((e) => {
+      getMetric(auth.session.role, finalRegion, instanceId, 'NetworkOut', 'Sum').catch((e) => {
         console.error(`❌ NetworkOut failed:`, e.message);
         return [];
       }),

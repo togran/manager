@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { requireSession } from "@/lib/auth";
+import type { NextRequest } from "next/server";
 
 const REGIONS = [
   // United States
@@ -26,6 +28,8 @@ const REGIONS = [
   { code: "sa-east-1", name: "South America (São Paulo)", group: "South America" },
 ];
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireSession(request);
+  if (auth.error) return auth.error;
   return NextResponse.json({ regions: REGIONS, default: process.env.AWS_REGION ?? null });
 }
