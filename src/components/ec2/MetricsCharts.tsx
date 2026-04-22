@@ -15,12 +15,20 @@ function GraphTooltipCard({ active, payload, label }: any) {
   if (!active || !payload || !payload.length) return null;
   const time = label;
   const value = payload[0]?.value;
+  const metricName = payload[0]?.name ?? "Metric";
   return (
-    <div className="rounded-lg border border-[#e5e7eb] bg-white p-3 shadow-lg min-w-[140px]">
-      <div className="mb-1 text-xs font-semibold text-slate-500">Time</div>
-      <div className="mb-2 text-sm font-mono text-[#111827]">{time}</div>
-      <div className="mb-1 text-xs font-semibold text-slate-500">Value</div>
-      <div className="text-base font-bold text-[#111827]">{value}</div>
+    <div className="min-w-[180px] rounded-lg border border-slate-700/70 bg-slate-900 px-3 py-2.5 text-slate-100 shadow-xl">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{metricName}</p>
+      <div className="mt-2 space-y-1.5">
+        <p className="text-xs text-slate-300">
+          <span className="font-semibold text-slate-400">Time:</span>{" "}
+          <span className="font-mono text-slate-100">{time}</span>
+        </p>
+        <p className="text-xs text-slate-300">
+          <span className="font-semibold text-slate-400">Value:</span>{" "}
+          <span className="font-semibold text-cyan-300">{value}</span>
+        </p>
+      </div>
     </div>
   );
 }
@@ -88,7 +96,11 @@ function Chart({
                 height={series.length > 8 ? 60 : 30}
               />
               <YAxis stroke="var(--color-muted-foreground)" fontSize={11} />
-              <Tooltip content={<GraphTooltipCard />} cursor={{ fill: '#f3f4f6' }} />
+              <Tooltip
+                content={<GraphTooltipCard />}
+                cursor={{ stroke: "var(--color-border)", strokeWidth: 1 }}
+                wrapperStyle={{ outline: "none" }}
+              />
               <Line
                 type="linear"
                 dataKey={dataKey}
