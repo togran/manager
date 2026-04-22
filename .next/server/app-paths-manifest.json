@@ -1,0 +1,5 @@
+{
+  "/api/ec2/instances/route": "app/api/ec2/instances/route.js",
+  "/page": "app/page.js",
+  "/api/ec2/regions/route": "app/api/ec2/regions/route.js"
+}
