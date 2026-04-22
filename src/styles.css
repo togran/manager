@@ -1,81 +1,55 @@
-@import "tailwindcss" source(none);
-@source "../src";
+@import "tailwindcss";
 @import "tw-animate-css";
 
+/* DARK MODE SUPPORT */
 @custom-variant dark (&:is(.dark *));
 
+/* THEME VARIABLES */
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-success: var(--success);
-  --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
-  --color-aws-orange: var(--aws-orange);
-  --color-aws-navy: var(--aws-navy);
-  --color-panel: var(--panel);
+  --color-background: #f8fafc;
+  --color-foreground: #0f172a;
+
+  --color-card: #ffffff;
+  --color-card-foreground: #0f172a;
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0f172a;
+
+  --color-border: #e5e7eb;
 }
 
+/* ROOT */
 :root {
-  --radius: 0.5rem;
-  --background: oklch(0.985 0.002 247);
-  --foreground: oklch(0.18 0.025 255);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.025 255);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.025 255);
-  --primary: oklch(0.32 0.06 255);
-  --primary-foreground: oklch(0.985 0.002 247);
-  --secondary: oklch(0.96 0.008 247);
-  --secondary-foreground: oklch(0.22 0.03 255);
-  --muted: oklch(0.96 0.008 247);
-  --muted-foreground: oklch(0.5 0.02 255);
-  --accent: oklch(0.94 0.02 230);
-  --accent-foreground: oklch(0.22 0.03 255);
-  --destructive: oklch(0.55 0.22 27);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0.01 247);
-  --input: oklch(0.9 0.01 247);
-  --ring: oklch(0.55 0.15 250);
-  --success: oklch(0.62 0.17 150);
-  --success-foreground: oklch(0.985 0 0);
-  --warning: oklch(0.78 0.16 75);
-  --warning-foreground: oklch(0.18 0.025 255);
-  --aws-orange: oklch(0.72 0.18 55);
-  --aws-navy: oklch(0.25 0.04 255);
-  --panel: oklch(1 0 0);
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --border: #e5e7eb;
 }
 
+/* BASE */
 @layer base {
   * {
-    border-color: var(--color-border);
+    border-color: var(--border);
   }
+
   body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
-    font-family:
-      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-      sans-serif;
+    background-color: var(--background);
+    color: var(--foreground);
   }
+}
+
+/* Keep Radix dropdown/select panels fully opaque and above content */
+[data-radix-dropdown-menu-content],
+[data-radix-select-content] {
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Ensure popper wrapper layer is above app content */
+[data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
 }
