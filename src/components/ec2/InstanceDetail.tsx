@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,7 @@ export function InstanceDetail({
   region: string | null;
   role?: "admin" | "user";
 }) {
+  const router = useRouter();
   const [actionLoading, setActionLoading] = useState<"start" | "stop" | "reboot" | "terminate" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -96,6 +98,13 @@ export function InstanceDetail({
           region,
         }),
       });
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (res.status === 403) {
+        throw new Error("You are not allowed to run EC2 actions.");
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to run action");
       setActionSuccess(`Instance ${action} request submitted.`);
@@ -108,7 +117,17 @@ export function InstanceDetail({
 
   const statusQuery = useQuery<InstanceStatusData>({
     queryKey: ["ec2-status", instance.InstanceId, region],
-    queryFn: () => fetch(`/api/ec2/status?instanceId=${instance.InstanceId}&region=${region}`).then(res => res.json()),
+    queryFn: async () => {
+      const res = await fetch(`/api/ec2/status?instanceId=${instance.InstanceId}&region=${region}`);
+      const data = await res.json();
+      if (res.status === 401) {
+        router.replace("/login");
+      }
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load status.");
+      }
+      return data;
+    },
   });
 
   // const describeVolumesFn = useServerFn(describeVolumes);

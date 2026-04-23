@@ -26,19 +26,24 @@ export default function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
+  function handleAuthRedirect(status: number) {
+    if (status === 401) {
+      router.replace("/login");
+      return true;
+    }
+    if (status === 403) {
+      router.replace("/");
+      return true;
+    }
+    return false;
+  }
+
   async function loadUsers() {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/users", { cache: "no-store" });
-      if (res.status === 401) {
-        router.replace("/login");
-        return;
-      }
-      if (res.status === 403) {
-        router.replace("/");
-        return;
-      }
+      if (handleAuthRedirect(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load users");
       setUsers(data.users ?? []);
@@ -64,6 +69,7 @@ export default function AdminUsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, role }),
       });
+      if (handleAuthRedirect(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create user");
 
@@ -85,6 +91,7 @@ export default function AdminUsersPage() {
     setDeletingId(id);
     try {
       const res = await fetch(`/api/users?id=${id}`, { method: "DELETE" });
+      if (handleAuthRedirect(res.status)) return;
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to delete user");
       setMessage("User deleted successfully.");
@@ -128,7 +135,7 @@ export default function AdminUsersPage() {
                 <SelectItem value="admin">admin</SelectItem>
               </SelectContent>
             </Select>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving} className="md:justify-self-end md:min-w-28">
               {saving ? "Creating..." : "Create user"}
             </Button>
           </form>

@@ -7,6 +7,7 @@ import {
 } from "@aws-sdk/client-ec2";
 import { createEc2Client } from "@/lib/aws";
 import { requireSession } from "@/lib/auth";
+import { getFriendlyAwsErrorMessage } from "@/lib/errors";
 
 export async function POST(request: NextRequest) {
   const auth = await requireSession(request, "admin");
@@ -37,9 +38,10 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ ok: true });
-  } catch (e) {
+  } catch (error: unknown) {
+    const message = getFriendlyAwsErrorMessage(error, "Failed to run EC2 action.");
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Action failed" },
+      { error: message },
       { status: 500 },
     );
   }

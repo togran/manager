@@ -19,17 +19,23 @@ export async function POST(request: NextRequest) {
       password?: string;
       role?: UserRole;
     };
+    const sanitizedUsername = username?.trim();
+    const sanitizedPassword = password?.trim();
     const validatedRole = normalizeRole(role);
 
-    if (!username || !password || !validatedRole) {
+    if (!sanitizedUsername || !sanitizedPassword || !validatedRole) {
       return NextResponse.json({ error: "username, password and role are required" }, { status: 400 });
     }
 
-    if (getUserByUsername(username)) {
+    if (sanitizedPassword.length < 8) {
+      return NextResponse.json({ error: "Password must be at least 8 characters long" }, { status: 400 });
+    }
+
+    if (getUserByUsername(sanitizedUsername)) {
       return NextResponse.json({ error: "Username already exists" }, { status: 409 });
     }
 
-    const created = createUser(username, password, validatedRole);
+    const created = createUser(sanitizedUsername, sanitizedPassword, validatedRole);
     return NextResponse.json({ user: created }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create user" }, { status: 500 });

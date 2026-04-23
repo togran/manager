@@ -23,15 +23,37 @@ export const dynamic = 'force-dynamic';
 
 function Index() {
   const router = useRouter();
+
+  async function parseJsonOrThrow<T>(res: Response, fallbackMessage: string): Promise<T> {
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+    if (res.status === 401) {
+      router.replace("/login");
+      throw new Error("Unauthorized");
+    }
+    if (res.status === 403) {
+      throw new Error("You do not have permission to perform this action.");
+    }
+    if (!res.ok) {
+      throw new Error((data as { error?: string }).error || fallbackMessage);
+    }
+    return data;
+  }
+
   const meQuery = useQuery<{ user: { id: number; username: string; role: "admin" | "user" } | null }>({
     queryKey: ["auth-me"],
-    queryFn: () => fetch("/api/auth/me").then((res) => res.json()),
+    queryFn: async () => {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      return parseJsonOrThrow(res, "Failed to load session.");
+    },
     retry: false,
   });
 
   const regionsQuery = useQuery<{ regions: AwsRegion[], default: string | null }>({
     queryKey: ["aws-regions"],
-    queryFn: () => fetch('/api/ec2/regions').then(res => res.json()),
+    queryFn: async () => {
+      const res = await fetch("/api/ec2/regions", { cache: "no-store" });
+      return parseJsonOrThrow(res, "Failed to load AWS regions.");
+    },
     staleTime: Infinity,
   });
 
@@ -42,7 +64,10 @@ function Index() {
 
   const { data, isLoading, isFetching, refetch } = useQuery<{ instances: Ec2Instance[], error: string | null, region: string | null }>({
     queryKey: ["ec2-instances", region],
-    queryFn: () => fetch(`/api/ec2/instances?region=${region}`).then(res => res.json()),
+    queryFn: async () => {
+      const res = await fetch(`/api/ec2/instances?region=${region}`, { cache: "no-store" });
+      return parseJsonOrThrow(res, "Failed to load EC2 instances.");
+    },
     enabled: !!region && region !== "",
   });
 
@@ -132,7 +157,7 @@ function Index() {
 
             {/* Region selector */}
             <Select value={region} onValueChange={(v) => { setRegion(v); setSelectedId(null); }}>
-              <SelectTrigger className="h-9 w-64 border-white/20 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 focus:ring-aws-orange">
+              <SelectTrigger className="h-9 w-48 sm:w-64 border-white/20 bg-white/10 text-white backdrop-blur-sm hover:bg-white/20 focus:ring-aws-orange">
                 <SelectValue placeholder="Select region" />
               </SelectTrigger>
               <SelectContent className="border-slate-200">

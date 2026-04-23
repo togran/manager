@@ -132,10 +132,16 @@ export function MetricsCharts({ instanceId, region }: { instanceId: string; regi
     error: string | null;
   }>({
     queryKey: ["ec2-metrics", instanceId, region],
-    queryFn: () =>
-      fetch(`/api/ec2/metrics?instanceId=${encodeURIComponent(instanceId)}&region=${encodeURIComponent(
-        region ?? '',
-      )}`).then((res) => res.json()),
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/ec2/metrics?instanceId=${encodeURIComponent(instanceId)}&region=${encodeURIComponent(region ?? "")}`,
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load CloudWatch metrics.");
+      }
+      return data;
+    },
     refetchInterval: 60_000,
   });
 

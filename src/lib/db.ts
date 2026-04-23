@@ -14,6 +14,7 @@ export type DbUser = {
 };
 
 let dbInstance: Database.Database | null = null;
+const PASSWORD_SALT_ROUNDS = 12;
 
 function getDatabasePath() {
   const dir = path.join(process.cwd(), "data");
@@ -39,7 +40,7 @@ function runMigrations(db: Database.Database) {
   if (adminCount.count === 0) {
     const username = process.env.INITIAL_ADMIN_USERNAME ?? "admin";
     const rawPassword = process.env.INITIAL_ADMIN_PASSWORD ?? "admin123";
-    const password = bcrypt.hashSync(rawPassword, 10);
+    const password = bcrypt.hashSync(rawPassword, PASSWORD_SALT_ROUNDS);
 
     db.prepare("INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')").run(
       username,
@@ -70,7 +71,7 @@ export function listUsers() {
 }
 
 export function createUser(username: string, password: string, role: UserRole) {
-  const hash = bcrypt.hashSync(password, 10);
+  const hash = bcrypt.hashSync(password, PASSWORD_SALT_ROUNDS);
   const res = getDb()
     .prepare("INSERT INTO users (username, password, role) VALUES (?, ?, ?)")
     .run(username, hash, role);

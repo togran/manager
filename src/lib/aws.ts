@@ -14,7 +14,9 @@ type AwsCredentialsApiResponse = {
   session_token?: string;
 };
 
-const AWS_CREDENTIALS_API_BASE_URL = "http://66.45.236.190";
+const DEFAULT_CREDENTIALS_ENDPOINT = "/api/external/credentials";
+const MOCK_ACCESS_KEY_ID = "mock_access_key_id";
+const MOCK_SECRET_ACCESS_KEY = "mock_secret_access_key";
 
 export type AwsCredentials = {
   accessKeyId: string;
@@ -27,35 +29,25 @@ function getDefaultRegion() {
   return process.env.AWS_REGION || "ap-southeast-1";
 }
 
-export async function getAwsCredentials(inputRole: unknown): Promise<AwsCredentials> {
-  const role = assertRole(inputRole);
-  const apiBase = AWS_CREDENTIALS_API_BASE_URL;
-  const url = `${apiBase}/getkey?role=${encodeURIComponent(role)}`;
+function isPlaceholder(value: string) {
+  return /your-|example\.com|placeholder/i.test(value);
+}
 
-  console.log(`[aws] Fetching credentials for role=${role} from ${url}`);
+function getCredentialsApiUrl(role: UserRole) {
+  const configuredBase = process.env.AWS_CREDENTIALS_API_BASE_URL?.trim();
+  const configuredUrl = process.env.AWS_CREDENTIALS_API_URL?.trim();
+  const explicitUrl = configuredUrl && !isPlaceholder(configuredUrl) ? configuredUrl : null;
+  const explicitBase = configuredBase && !isPlaceholder(configuredBase) ? configuredBase : null;
+  const useInternalEndpoint = process.env.AWS_USE_INTERNAL_CREDENTIALS_API === "true";
+  const baseUrl = explicitUrl || explicitBase || (useInternalEndpoint ? DEFAULT_CREDENTIALS_ENDPOINT : null);
+  if (!baseUrl) return null;
+  return `${baseUrl}?role=${encodeURIComponent(role)}`;
+}
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Credential API failed (${response.status}): ${text.slice(0, 200)}`);
-  }
-
-  const body = (await response.json()) as AwsCredentialsApiResponse;
+function normalizeCredentials(body: AwsCredentialsApiResponse): AwsCredentials {
   const accessKeyId = body.accessKeyId || body.access_key_id;
   const secretAccessKey = body.secretAccessKey || body.secret_access_key || body.secret_key;
   const sessionToken = body.sessionToken || body.session_token;
-
-  console.log("[aws] Credential API response:", {
-    hasAccessKeyId: Boolean(accessKeyId),
-    hasSecretAccessKey: Boolean(secretAccessKey),
-    hasSessionToken: Boolean(sessionToken),
-    region: body?.region ?? null,
-  });
 
   if (!accessKeyId || !secretAccessKey) {
     throw new Error("Credential API response missing accessKeyId/secretAccessKey");
@@ -67,6 +59,74 @@ export async function getAwsCredentials(inputRole: unknown): Promise<AwsCredenti
     sessionToken,
     region: body.region || getDefaultRegion(),
   };
+}
+
+function getMockCredentials() {
+  return {
+    accessKeyId: process.env.MOCK_AWS_ACCESS_KEY_ID || MOCK_ACCESS_KEY_ID,
+    secretAccessKey: process.env.MOCK_AWS_SECRET_ACCESS_KEY || MOCK_SECRET_ACCESS_KEY,
+    sessionToken: process.env.MOCK_AWS_SESSION_TOKEN || undefined,
+    region: process.env.MOCK_AWS_REGION || getDefaultRegion(),
+  };
+}
+
+function getEnvCredentials(): AwsCredentials | null {
+  const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim();
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim();
+  if (!accessKeyId || !secretAccessKey) return null;
+
+  return {
+    accessKeyId,
+    secretAccessKey,
+    sessionToken: process.env.AWS_SESSION_TOKEN?.trim() || undefined,
+    region: getDefaultRegion(),
+  };
+}
+
+export async function getAwsCredentials(inputRole: unknown): Promise<AwsCredentials> {
+  const role = assertRole(inputRole);
+  const url = getCredentialsApiUrl(role);
+  const envCredentials = getEnvCredentials();
+  const allowMockFallback = process.env.AWS_CREDENTIALS_ALLOW_MOCK !== "false";
+
+  if (!url && envCredentials) {
+    return envCredentials;
+  }
+
+  try {
+    if (!url) {
+      throw new Error("Credentials API URL is not configured.");
+    }
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Credential API failed (${response.status}): ${text.slice(0, 200)}`);
+    }
+
+    const body = (await response.json()) as AwsCredentialsApiResponse;
+    return normalizeCredentials(body);
+  } catch (error) {
+    if (envCredentials) {
+      console.warn(`[aws] Using AWS credentials from environment for role=${role}.`);
+      return envCredentials;
+    }
+
+    if (!allowMockFallback) {
+      throw error instanceof Error ? error : new Error("Unable to fetch AWS credentials");
+    }
+
+    console.warn(
+      `[aws] Falling back to mock credentials for role=${role}. Set AWS_CREDENTIALS_ALLOW_MOCK=false in production.`,
+    );
+    return getMockCredentials();
+  }
 }
 
 export async function createEc2Client(role: UserRole, region?: string | null) {

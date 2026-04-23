@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { DescribeInstanceStatusCommand } from "@aws-sdk/client-ec2";
 import { createEc2Client } from "@/lib/aws";
 import { requireSession } from "@/lib/auth";
+import { getFriendlyAwsErrorMessage } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
   const auth = await requireSession(request);
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
   const region = searchParams.get('region');
 
   if (!instanceId) {
-    return NextResponse.json({ status: null, error: 'instanceId required' });
+    return NextResponse.json({ status: null, error: "instanceId required" }, { status: 400 });
   }
 
   try {
@@ -43,10 +44,13 @@ export async function GET(request: NextRequest) {
       },
       error: null,
     });
-  } catch (e: any) {
-    console.error(`❌ Status API failed:`, e.message);
+  } catch (error: unknown) {
+    const message = getFriendlyAwsErrorMessage(
+      error,
+      "Failed to load instance status from AWS.",
+    );
     return NextResponse.json(
-      { status: null, error: e?.message ?? "Unknown error" },
+      { status: null, error: message },
       { status: 500 }
     );
   }

@@ -9,17 +9,19 @@ export async function POST(request: Request) {
       username?: string;
       password?: string;
     };
+    const sanitizedUsername = username?.trim();
+    const sanitizedPassword = password?.trim();
 
-    if (!username || !password) {
+    if (!sanitizedUsername || !sanitizedPassword) {
       return NextResponse.json({ error: "Username and password are required" }, { status: 400 });
     }
 
-    const user = getUserByUsername(username);
+    const user = getUserByUsername(sanitizedUsername);
     if (!user) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    const ok = bcrypt.compareSync(password, user.password);
+    const ok = bcrypt.compareSync(sanitizedPassword, user.password);
     if (!ok) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }

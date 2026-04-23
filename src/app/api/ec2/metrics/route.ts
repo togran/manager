@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GetMetricStatisticsCommand } from "@aws-sdk/client-cloudwatch";
 import { createCloudWatchClient } from "@/lib/aws";
 import { requireSession } from "@/lib/auth";
+import { getFriendlyAwsErrorMessage } from "@/lib/errors";
 
 interface MetricPoint {
   Timestamp: string;
@@ -49,15 +50,19 @@ export async function GET(request: NextRequest) {
   const region = searchParams.get('region');
 
   if (!instanceId) {
-    return NextResponse.json({ cpu: [], netIn: [], netOut: [], error: 'instanceId is required' });
+    return NextResponse.json(
+      { cpu: [], netIn: [], netOut: [], error: "instanceId is required" },
+      { status: 400 },
+    );
   }
 
   const finalRegion = region || process.env.AWS_REGION;
   if (!finalRegion) {
-    return NextResponse.json({ cpu: [], netIn: [], netOut: [], error: 'AWS_REGION not configured' });
+    return NextResponse.json(
+      { cpu: [], netIn: [], netOut: [], error: "AWS_REGION not configured" },
+      { status: 500 },
+    );
   }
-
-  console.log(`📊 Fetching metrics for ${instanceId} in ${finalRegion}`);
 
   try {
     const [cpu, netIn, netOut] = await Promise.all([
@@ -74,17 +79,15 @@ export async function GET(request: NextRequest) {
         return [];
       }),
     ]);
-    
-    console.log(`✅ Metrics collected: CPU=${cpu.length}, NetIn=${netIn.length}, NetOut=${netOut.length}`);
-    
+
     return NextResponse.json({ cpu, netIn, netOut, error: null });
-  } catch (e: any) {
-    console.error('❌ getInstanceMetrics failed:', e);
+  } catch (error: unknown) {
+    const message = getFriendlyAwsErrorMessage(error, "Failed to load CloudWatch metrics.");
     return NextResponse.json({
       cpu: [] as MetricPoint[],
       netIn: [] as MetricPoint[],
       netOut: [] as MetricPoint[],
-      error: e?.message ?? 'Unknown error',
-    });
+      error: message,
+    }, { status: 500 });
   }
 }

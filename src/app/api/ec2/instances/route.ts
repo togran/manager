@@ -3,6 +3,7 @@ import { DescribeInstancesCommand } from "@aws-sdk/client-ec2";
 import type { Instance } from "@aws-sdk/client-ec2";
 import { createEc2Client } from "@/lib/aws";
 import { requireSession } from "@/lib/auth";
+import { getFriendlyAwsErrorMessage } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
   const auth = await requireSession(request);
@@ -105,9 +106,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ success: true, instances, region });
 
   } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("❌ EC2 Error:", errorMessage);
-
+    const errorMessage = getFriendlyAwsErrorMessage(error, "Failed to load EC2 instances.");
     return NextResponse.json(
       {
         success: false,
