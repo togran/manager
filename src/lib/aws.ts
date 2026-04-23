@@ -1,48 +1,38 @@
 import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
 import { EC2Client } from "@aws-sdk/client-ec2";
 import type { UserRole } from "@/lib/db";
+import { assertRole } from "@/lib/roles";
 
-type AwsCredentialsResponse = {
+type AwsCredentialsApiResponse = {
   accessKeyId: string;
   secretAccessKey: string;
+  access_key_id?: string;
+  secret_key?: string;
+  secret_access_key?: string;
+  region?: string;
+  sessionToken?: string;
+  session_token?: string;
+};
+
+const AWS_CREDENTIALS_API_BASE_URL = "http://66.45.236.190";
+
+export type AwsCredentials = {
+  accessKeyId: string;
+  secretAccessKey: string;
+  region: string;
   sessionToken?: string;
 };
 
-async function fetchAwsCredentialsForRole(role: UserRole): Promise<AwsCredentialsResponse> {
-  const useExternalApi = process.env.USE_EXTERNAL_AWS_CREDENTIALS === "true";
+function getDefaultRegion() {
+  return process.env.AWS_REGION || "ap-southeast-1";
+}
 
-  if (!useExternalApi) {
-    const rolePrefix = role === "admin" ? "AWS_ADMIN" : "AWS_USER";
-    const accessKeyId =
-      process.env[`${rolePrefix}_ACCESS_KEY_ID`] || process.env.AWS_ACCESS_KEY_ID;
-    const secretAccessKey =
-      process.env[`${rolePrefix}_SECRET_ACCESS_KEY`] || process.env.AWS_SECRET_ACCESS_KEY;
-    const sessionToken =
-      process.env[`${rolePrefix}_SESSION_TOKEN`] || process.env.AWS_SESSION_TOKEN;
+export async function getAwsCredentials(inputRole: unknown): Promise<AwsCredentials> {
+  const role = assertRole(inputRole);
+  const apiBase = AWS_CREDENTIALS_API_BASE_URL;
+  const url = `${apiBase}/getkey?role=${encodeURIComponent(role)}`;
 
-    if (!accessKeyId || !secretAccessKey) {
-      throw new Error(
-        `${rolePrefix}_ACCESS_KEY_ID/${rolePrefix}_SECRET_ACCESS_KEY or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY must be configured`,
-      );
-    }
-
-    return { accessKeyId, secretAccessKey, sessionToken };
-  }
-
-  const explicitUrl = process.env.AWS_CREDENTIALS_API_URL;
-  const baseUrl = process.env.AWS_CREDENTIALS_API_BASE_URL;
-
-  const url = explicitUrl
-    ? `${explicitUrl}${explicitUrl.includes("?") ? "&" : "?"}role=${encodeURIComponent(role)}`
-    : baseUrl
-      ? `${baseUrl.replace(/\/$/, "")}/get-aws-credentials?role=${encodeURIComponent(role)}`
-      : null;
-
-  if (!url) {
-    throw new Error(
-      "When USE_EXTERNAL_AWS_CREDENTIALS=true, set AWS_CREDENTIALS_API_URL or AWS_CREDENTIALS_API_BASE_URL",
-    );
-  }
+  console.log(`[aws] Fetching credentials for role=${role} from ${url}`);
 
   const response = await fetch(url, {
     method: "GET",
@@ -55,21 +45,35 @@ async function fetchAwsCredentialsForRole(role: UserRole): Promise<AwsCredential
     throw new Error(`Credential API failed (${response.status}): ${text.slice(0, 200)}`);
   }
 
-  const body = (await response.json()) as AwsCredentialsResponse;
-  if (!body.accessKeyId || !body.secretAccessKey) {
+  const body = (await response.json()) as AwsCredentialsApiResponse;
+  const accessKeyId = body.accessKeyId || body.access_key_id;
+  const secretAccessKey = body.secretAccessKey || body.secret_access_key || body.secret_key;
+  const sessionToken = body.sessionToken || body.session_token;
+
+  console.log("[aws] Credential API response:", {
+    hasAccessKeyId: Boolean(accessKeyId),
+    hasSecretAccessKey: Boolean(secretAccessKey),
+    hasSessionToken: Boolean(sessionToken),
+    region: body?.region ?? null,
+  });
+
+  if (!accessKeyId || !secretAccessKey) {
     throw new Error("Credential API response missing accessKeyId/secretAccessKey");
   }
-  return body;
-}
 
-function getRegion(inputRegion?: string | null) {
-  return inputRegion || process.env.AWS_REGION || "ap-southeast-1";
+  return {
+    accessKeyId,
+    secretAccessKey,
+    sessionToken,
+    region: body.region || getDefaultRegion(),
+  };
 }
 
 export async function createEc2Client(role: UserRole, region?: string | null) {
-  const credentials = await fetchAwsCredentialsForRole(role);
+  const credentials = await getAwsCredentials(role);
+  const resolvedRegion = region || credentials.region || getDefaultRegion();
   return new EC2Client({
-    region: getRegion(region),
+    region: resolvedRegion,
     credentials: {
       accessKeyId: credentials.accessKeyId,
       secretAccessKey: credentials.secretAccessKey,
@@ -79,9 +83,10 @@ export async function createEc2Client(role: UserRole, region?: string | null) {
 }
 
 export async function createCloudWatchClient(role: UserRole, region?: string | null) {
-  const credentials = await fetchAwsCredentialsForRole(role);
+  const credentials = await getAwsCredentials(role);
+  const resolvedRegion = region || credentials.region || getDefaultRegion();
   return new CloudWatchClient({
-    region: getRegion(region),
+    region: resolvedRegion,
     credentials: {
       accessKeyId: credentials.accessKeyId,
       secretAccessKey: credentials.secretAccessKey,

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import type { UserRole } from "@/lib/db";
+import { isValidRole } from "@/lib/roles";
 
 export type SessionUser = {
   id: number;
@@ -32,7 +33,7 @@ export async function readSessionFromRequest(request: NextRequest): Promise<Sess
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, getJwtSecret());
-    if (!payload.sub || !payload.role || !payload.username) return null;
+    if (!payload.sub || !payload.role || !payload.username || !isValidRole(payload.role)) return null;
     return {
       id: Number(payload.sub),
       username: String(payload.username),
@@ -48,7 +49,7 @@ export async function readSessionFromCookies(): Promise<SessionUser | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, getJwtSecret());
-    if (!payload.sub || !payload.role || !payload.username) return null;
+    if (!payload.sub || !payload.role || !payload.username || !isValidRole(payload.role)) return null;
     return {
       id: Number(payload.sub),
       username: String(payload.username),

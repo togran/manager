@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "action and instanceId are required" }, { status: 400 });
     }
 
-    const client = await createEc2Client("admin", region || undefined);
+    const client = await createEc2Client(auth.session.role, region || undefined);
     if (action === "start") {
       await client.send(new StartInstancesCommand({ InstanceIds: [instanceId] }));
     } else if (action === "stop") {

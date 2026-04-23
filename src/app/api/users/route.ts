@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
 import { createUser, deleteUserById, getUserByUsername, listUsers, type UserRole } from "@/lib/db";
+import { normalizeRole } from "@/lib/roles";
 
 export async function GET(request: NextRequest) {
   const auth = await requireSession(request, "admin");
@@ -18,8 +19,9 @@ export async function POST(request: NextRequest) {
       password?: string;
       role?: UserRole;
     };
+    const validatedRole = normalizeRole(role);
 
-    if (!username || !password || !role || !["admin", "user"].includes(role)) {
+    if (!username || !password || !validatedRole) {
       return NextResponse.json({ error: "username, password and role are required" }, { status: 400 });
     }
 
@@ -27,7 +29,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Username already exists" }, { status: 409 });
     }
 
-    const created = createUser(username, password, role);
+    const created = createUser(username, password, validatedRole);
     return NextResponse.json({ user: created }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "Failed to create user" }, { status: 500 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,20 +14,31 @@ type User = {
 };
 
 export default function AdminUsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "user">("user");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   async function loadUsers() {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/users", { cache: "no-store" });
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (res.status === 403) {
+        router.replace("/");
+        return;
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load users");
       setUsers(data.users ?? []);
@@ -45,6 +57,7 @@ export default function AdminUsersPage() {
     e.preventDefault();
     setSaving(true);
     setError(null);
+    setMessage(null);
     try {
       const res = await fetch("/api/users", {
         method: "POST",
@@ -57,6 +70,7 @@ export default function AdminUsersPage() {
       setUsername("");
       setPassword("");
       setRole("user");
+      setMessage("User created successfully.");
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create user");
@@ -67,13 +81,18 @@ export default function AdminUsersPage() {
 
   async function onDeleteUser(id: number) {
     setError(null);
+    setMessage(null);
+    setDeletingId(id);
     try {
       const res = await fetch(`/api/users?id=${id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to delete user");
+      setMessage("User deleted successfully.");
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete user");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -118,6 +137,11 @@ export default function AdminUsersPage() {
               {error}
             </p>
           )}
+          {message && (
+            <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              {message}
+            </p>
+          )}
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -142,8 +166,13 @@ export default function AdminUsersPage() {
                       <td className="px-2 py-2">{user.role}</td>
                       <td className="px-2 py-2">{new Date(user.createdAt).toLocaleString()}</td>
                       <td className="px-2 py-2 text-right">
-                        <Button variant="destructive" size="sm" onClick={() => onDeleteUser(user.id)}>
-                          Delete
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={deletingId === user.id}
+                          onClick={() => onDeleteUser(user.id)}
+                        >
+                          {deletingId === user.id ? "Deleting..." : "Delete"}
                         </Button>
                       </td>
                     </tr>

@@ -1,6 +1,7 @@
 import { jwtVerify } from "jose";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isValidRole } from "@/lib/roles";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login"];
 const ADMIN_ONLY_PATH_PREFIXES = ["/admin", "/api/users", "/api/ec2/actions"];
@@ -34,6 +35,12 @@ export async function middleware(request: NextRequest) {
   try {
     const { payload } = await jwtVerify(token, getSecret());
     const role = payload.role as string | undefined;
+    if (!isValidRole(role)) {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
 
     if (ADMIN_ONLY_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
       if (role !== "admin") {
