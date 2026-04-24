@@ -1,11 +1,16 @@
 import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
 import { EC2Client } from "@aws-sdk/client-ec2";
 import type { UserRole } from "@/lib/db";
+import { decrypt } from "@/lib/crypto";
 import { assertRole } from "@/lib/roles";
 
 type AwsCredentialsApiResponse = {
   accessKeyId: string;
   secretAccessKey: string;
+  encryptedSecretAccessKey?: string;
+  encrypted_secret_access_key?: string;
+  encryptedSessionToken?: string;
+  encrypted_session_token?: string;
   access_key_id?: string;
   secret_key?: string;
   secret_access_key?: string;
@@ -45,12 +50,21 @@ function getCredentialsApiUrl(role: UserRole) {
 }
 
 function normalizeCredentials(body: AwsCredentialsApiResponse): AwsCredentials {
+  const encryptedSecret = body.encryptedSecretAccessKey || body.encrypted_secret_access_key;
+  const encryptedSessionToken = body.encryptedSessionToken || body.encrypted_session_token;
   const accessKeyId = body.accessKeyId || body.access_key_id;
-  const secretAccessKey = body.secretAccessKey || body.secret_access_key || body.secret_key;
-  const sessionToken = body.sessionToken || body.session_token;
+  const secretAccessKey =
+    body.secretAccessKey ||
+    body.secret_access_key ||
+    body.secret_key ||
+    (encryptedSecret ? decrypt(encryptedSecret) : undefined);
+  const sessionToken =
+    body.sessionToken || body.session_token || (encryptedSessionToken ? decrypt(encryptedSessionToken) : undefined);
 
   if (!accessKeyId || !secretAccessKey) {
-    throw new Error("Credential API response missing accessKeyId/secretAccessKey");
+    throw new Error(
+      "Credential API response missing accessKeyId/secretAccessKey or encryptedSecretAccessKey",
+    );
   }
 
   return {
