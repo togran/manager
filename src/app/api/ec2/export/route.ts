@@ -23,7 +23,7 @@ type ExportRow = {
 };
 
 export async function GET(request: NextRequest) {
-  const auth = await requireSession(request);
+  const auth = await requireSession(request, "admin");
   if (auth.error) return auth.error;
 
   try {

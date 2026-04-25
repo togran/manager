@@ -6,7 +6,7 @@ import { listInstanceActionLogs } from "@/lib/db";
 import { getFriendlyAwsErrorMessage } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireSession(request);
+  const auth = await requireSession(request, "admin");
   if (auth.error) return auth.error;
 
   const { searchParams } = new URL(request.url);

@@ -25,6 +25,7 @@ export const dynamic = 'force-dynamic';
 function Index() {
   const router = useRouter();
   type InstanceAction = "start" | "stop" | "reboot" | "terminate";
+  const adminOnlyMessage = "Only admin can use this feature.";
 
   async function parseJsonOrThrow<T>(res: Response, fallbackMessage: string): Promise<T> {
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
@@ -199,6 +200,10 @@ function Index() {
   }
 
   function downloadExport(format: "csv" | "json") {
+    if (meQuery.data?.user?.role !== "admin") {
+      window.alert(adminOnlyMessage);
+      return;
+    }
     if (!region) return;
     const params = new URLSearchParams({
       format,
@@ -374,6 +379,7 @@ function Index() {
                 className="h-7 px-2 text-[11px]"
                 disabled={!region}
                 onClick={() => downloadExport("csv")}
+                title={meQuery.data?.user?.role === "admin" ? "Export CSV report" : adminOnlyMessage}
               >
                 Export CSV
               </Button>
@@ -383,6 +389,7 @@ function Index() {
                 className="h-7 px-2 text-[11px]"
                 disabled={!region}
                 onClick={() => downloadExport("json")}
+                title={meQuery.data?.user?.role === "admin" ? "Export JSON report" : adminOnlyMessage}
               >
                 Export JSON
               </Button>

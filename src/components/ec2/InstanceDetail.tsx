@@ -108,6 +108,8 @@ export function InstanceDetail({
   const [actionLoading, setActionLoading] = useState<"start" | "stop" | "reboot" | "terminate" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("details");
+  const adminOnlyMessage = "Only admin can use this feature.";
 
   async function runInstanceAction(action: "start" | "stop" | "reboot" | "terminate") {
     if (action === "terminate") {
@@ -190,7 +192,17 @@ export function InstanceDetail({
       if (!res.ok) throw new Error(data.error ?? "Failed to load timeline.");
       return data;
     },
+    enabled: role === "admin",
   });
+
+  function handleTabChange(nextTab: string) {
+    if (nextTab === "timeline" && role !== "admin") {
+      window.alert(adminOnlyMessage);
+      setActiveTab("details");
+      return;
+    }
+    setActiveTab(nextTab);
+  }
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-slate-900">
@@ -305,7 +317,7 @@ export function InstanceDetail({
         </div>
       </div>
 
-      <Tabs defaultValue="details" className="flex flex-1 flex-col overflow-hidden">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-1 flex-col overflow-hidden">
         <div className="border-b border-border bg-panel px-4">
           <TabsList className="h-auto rounded-none bg-transparent p-0">
             {[
@@ -322,6 +334,7 @@ export function InstanceDetail({
                 key={v}
                 value={v}
                 className="rounded-none border-b-2 border-transparent bg-transparent px-4 py-3 text-sm font-medium text-muted-foreground data-[state=active]:border-aws-orange data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none"
+                title={v === "timeline" && role !== "admin" ? adminOnlyMessage : undefined}
               >
                 {l}
               </TabsTrigger>

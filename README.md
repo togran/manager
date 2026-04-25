@@ -98,6 +98,7 @@ These are decrypted server-side only.
 ### 1) Instance Lifecycle Timeline
 
 - New route: `GET /api/ec2/timeline?instanceId=<id>&region=<region>`
+- Access: **admin only** (users get forbidden response)
 - Timeline includes:
   - Launch time and current state
   - Status checks snapshot (system/instance)
@@ -108,6 +109,7 @@ These are decrypted server-side only.
 ### 2) Export & Reports
 
 - New route: `GET /api/ec2/export?format=csv|json&region=<region>&state=<state>&search=<term>`
+- Access: **admin only** (users get forbidden response)
 - Supports filtered exports (based on region/state/search)
 - JSON report includes:
   - `generatedAt`
@@ -117,6 +119,7 @@ These are decrypted server-side only.
   - Inventory fields (ID, name, type, state, AZ, IPs, tags, SGs)
   - `SecurityPosture` indicators (`PUBLIC_ENDPOINT`, `NO_IAM_ROLE`, `NO_SECURITY_GROUP`, `OK`)
 - UI: Added **Export CSV** and **Export JSON** controls.
+- Non-admin click behavior: popup message shown (`Only admin can use this feature.`)
 
 ### 3) Action Audit Logging
 
