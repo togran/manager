@@ -461,11 +461,19 @@ function Index() {
             ) : (
               <div className="divide-y divide-slate-200/60 dark:divide-slate-700/60">
                 {filtered.map((instance) => (
-                  <button
+                  <div
                     key={instance.InstanceId}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSelectedId(instance.InstanceId)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedId(instance.InstanceId);
+                      }
+                    }}
                     className={cn(
-                      "w-full p-4 text-left transition-all duration-200 hover:bg-slate-50/80 dark:hover:bg-slate-800/50",
+                      "w-full cursor-pointer p-4 text-left transition-all duration-200 hover:bg-slate-50/80 dark:hover:bg-slate-800/50",
                       selected?.InstanceId === instance.InstanceId && "bg-aws-orange/10 border-r-2 border-r-aws-orange dark:bg-aws-orange/5",
                     )}
                   >
@@ -515,7 +523,7 @@ function Index() {
                         </div>
                       </div>
                     </div>
-                  </button>
+                  </div>
                 ))}
                 {filtered.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
