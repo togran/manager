@@ -1,0 +1,45 @@
+Instance Inspector - Client Delivery Update
+Date: 2026-04-25
+
+What has been completed:
+
+1) Instance Lifecycle Timeline
+- Added lifecycle timeline support for each EC2 instance.
+- Includes:
+  - Launch time
+  - Current state snapshot
+  - System and instance status checks
+  - Scheduled AWS events
+  - Full action history (start/stop/reboot/terminate) with timestamp and actor
+- Timeline is available in the new "Timeline" tab inside instance details.
+
+2) Export and Reports
+- Added export APIs and UI controls for:
+  - CSV export
+  - JSON export
+- Export supports active filters (region/state/search).
+- Reports now include:
+  - Instance inventory
+  - Tags
+  - Security groups
+  - State summary
+  - Security posture flags (PUBLIC_ENDPOINT, NO_IAM_ROLE, NO_SECURITY_GROUP, OK)
+
+3) Audit Trail for Admin Actions
+- Every EC2 action request is now tracked in database logs:
+  - requested
+  - success
+  - failed
+- Logs capture actor, role, instance ID, region, and action context.
+
+Business value:
+- Better operational transparency
+- Better compliance and accountability
+- Faster reporting for stakeholders
+- More AWS Console-like control experience
+
+Suggested screenshot checklist to share:
+1. Timeline tab visible with action history rows
+2. Scheduled events section in timeline
+3. Export CSV and Export JSON buttons in sidebar
+4. A generated CSV/JSON report file preview

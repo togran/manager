@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -23,6 +24,7 @@ export const dynamic = 'force-dynamic';
 
 function Index() {
   const router = useRouter();
+  type InstanceAction = "start" | "stop" | "reboot" | "terminate";
 
   async function parseJsonOrThrow<T>(res: Response, fallbackMessage: string): Promise<T> {
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
@@ -73,11 +75,17 @@ function Index() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("name");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkActionLoading, setBulkActionLoading] = useState<InstanceAction | null>(null);
+  const [bulkActionMessage, setBulkActionMessage] = useState<string | null>(null);
+  const [bulkActionError, setBulkActionError] = useState<string | null>(null);
 
   const instances = data?.instances ?? [];
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return q
+    const bySearch = q
       ? instances.filter(
           (i) =>
             i.InstanceId.toLowerCase().includes(q) ||
@@ -85,15 +93,120 @@ function Index() {
             i.InstanceType.toLowerCase().includes(q),
         )
       : instances;
-  }, [instances, search]);
+
+    const byState =
+      stateFilter === "all" ? bySearch : bySearch.filter((i) => i.State.toLowerCase() === stateFilter);
+
+    const sorted = [...byState].sort((a, b) => {
+      if (sortBy === "launch-desc" || sortBy === "launch-asc") {
+        const aTime = new Date(a.LaunchTime).getTime();
+        const bTime = new Date(b.LaunchTime).getTime();
+        return sortBy === "launch-desc" ? bTime - aTime : aTime - bTime;
+      }
+      if (sortBy === "state") {
+        return a.State.localeCompare(b.State);
+      }
+      return (a.Name || a.InstanceId).localeCompare(b.Name || b.InstanceId);
+    });
+
+    return sorted;
+  }, [instances, search, stateFilter, sortBy]);
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = prev.filter((id) => instances.some((instance) => instance.InstanceId === id));
+      if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
+        return prev;
+      }
+      return next;
+    });
+  }, [instances]);
 
   const selected =
     instances.find((i) => i.InstanceId === selectedId) ?? filtered[0] ?? null;
+
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((instance) => selectedIds.includes(instance.InstanceId));
+
+  const someFilteredSelected =
+    filtered.some((instance) => selectedIds.includes(instance.InstanceId)) && !allFilteredSelected;
+
+  function toggleInstanceSelection(instanceId: string, checked: boolean) {
+    setSelectedIds((prev) =>
+      checked ? (prev.includes(instanceId) ? prev : [...prev, instanceId]) : prev.filter((id) => id !== instanceId),
+    );
+  }
+
+  function toggleSelectAllFiltered(checked: boolean) {
+    if (checked) {
+      setSelectedIds((prev) => {
+        const merged = new Set([...prev, ...filtered.map((instance) => instance.InstanceId)]);
+        return Array.from(merged);
+      });
+      return;
+    }
+    const filteredIds = new Set(filtered.map((instance) => instance.InstanceId));
+    setSelectedIds((prev) => prev.filter((id) => !filteredIds.has(id)));
+  }
+
+  async function runBulkAction(action: InstanceAction) {
+    if (selectedIds.length === 0) return;
+    if (action === "terminate") {
+      const ok = window.confirm(
+        `Terminate ${selectedIds.length} instance${selectedIds.length !== 1 ? "s" : ""}? This action can be destructive.`,
+      );
+      if (!ok) return;
+    }
+    setBulkActionLoading(action);
+    setBulkActionMessage(null);
+    setBulkActionError(null);
+    try {
+      const res = await fetch("/api/ec2/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          instanceIds: selectedIds,
+          region,
+        }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string; count?: number };
+      if (res.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (res.status === 403) {
+        throw new Error("You do not have permission to run EC2 actions.");
+      }
+      if (!res.ok) {
+        throw new Error(payload.error || "Failed to run action.");
+      }
+      const count = payload.count ?? selectedIds.length;
+      setBulkActionMessage(`${action} request submitted for ${count} instance${count !== 1 ? "s" : ""}.`);
+      await refetch();
+      setSelectedIds([]);
+    } catch (error) {
+      setBulkActionError(error instanceof Error ? error.message : "Failed to run bulk action.");
+    } finally {
+      setBulkActionLoading(null);
+    }
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
     router.refresh();
+  }
+
+  function downloadExport(format: "csv" | "json") {
+    if (!region) return;
+    const params = new URLSearchParams({
+      format,
+      region,
+      state: stateFilter,
+      search,
+    });
+    window.open(`/api/ec2/export?${params.toString()}`, "_blank");
   }
 
   return (
@@ -224,10 +337,96 @@ function Index() {
               )}
             </Button>
           </div>
+          <div className="grid grid-cols-2 gap-2 border-b border-slate-200/60 bg-slate-50/30 px-4 py-2 dark:border-slate-700/60 dark:bg-slate-800/30">
+            <Select value={stateFilter} onValueChange={setStateFilter}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="State" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All states</SelectItem>
+                <SelectItem value="running">Running</SelectItem>
+                <SelectItem value="stopped">Stopped</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="stopping">Stopping</SelectItem>
+                <SelectItem value="terminated">Terminated</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Sort: Name</SelectItem>
+                <SelectItem value="state">Sort: State</SelectItem>
+                <SelectItem value="launch-desc">Launch: Newest</SelectItem>
+                <SelectItem value="launch-asc">Launch: Oldest</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 bg-slate-50/30 px-4 py-2 dark:border-slate-700/60 dark:bg-slate-800/30">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Export & Reports
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                disabled={!region}
+                onClick={() => downloadExport("csv")}
+              >
+                Export CSV
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[11px]"
+                disabled={!region}
+                onClick={() => downloadExport("json")}
+              >
+                Export JSON
+              </Button>
+            </div>
+          </div>
+          {meQuery.data?.user?.role === "admin" && selectedIds.length > 0 && (
+            <div className="border-b border-slate-200/60 bg-aws-orange/10 px-4 py-3 text-xs dark:border-slate-700/60 dark:bg-aws-orange/5">
+              <div className="mb-2 font-medium text-slate-700 dark:text-slate-200">
+                {selectedIds.length} selected
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={bulkActionLoading !== null} onClick={() => runBulkAction("start")}>
+                  {bulkActionLoading === "start" ? "Starting..." : "Start"}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={bulkActionLoading !== null} onClick={() => runBulkAction("stop")}>
+                  {bulkActionLoading === "stop" ? "Stopping..." : "Stop"}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={bulkActionLoading !== null} onClick={() => runBulkAction("reboot")}>
+                  {bulkActionLoading === "reboot" ? "Rebooting..." : "Reboot"}
+                </Button>
+                <Button size="sm" variant="destructive" className="h-7 text-xs" disabled={bulkActionLoading !== null} onClick={() => runBulkAction("terminate")}>
+                  {bulkActionLoading === "terminate" ? "Terminating..." : "Terminate"}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedIds([])}>
+                  Clear
+                </Button>
+              </div>
+              {bulkActionMessage && <p className="mt-2 text-emerald-700 dark:text-emerald-400">{bulkActionMessage}</p>}
+              {bulkActionError && <p className="mt-2 text-red-700 dark:text-red-400">{bulkActionError}</p>}
+            </div>
+          )}
 
           {/* Instance count */}
           <div className="flex items-center justify-between border-b border-slate-200/60 bg-slate-50/30 px-4 py-2 text-xs text-slate-600 dark:border-slate-700/60 dark:bg-slate-800/30 dark:text-slate-400">
-            <span>Instances</span>
+            <span className="flex items-center gap-2">
+              {meQuery.data?.user?.role === "admin" && (
+                <Checkbox
+                  checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                  onCheckedChange={(checked) => toggleSelectAllFiltered(checked === true)}
+                  aria-label="Select all filtered instances"
+                />
+              )}
+              Instances
+            </span>
             <span className="font-medium">{filtered.length} of {instances.length}</span>
           </div>
 
@@ -264,6 +463,20 @@ function Index() {
                     )}
                   >
                     <div className="flex items-start gap-3">
+                      {meQuery.data?.user?.role === "admin" && (
+                        <div
+                          className="pt-0.5"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                          }}
+                        >
+                          <Checkbox
+                            checked={selectedIds.includes(instance.InstanceId)}
+                            onCheckedChange={(checked) => toggleInstanceSelection(instance.InstanceId, checked === true)}
+                            aria-label={`Select ${instance.InstanceId}`}
+                          />
+                        </div>
+                      )}
                       <div className="relative mt-0.5">
                         <StateBadge state={instance.State} />
                         {selected?.InstanceId === instance.InstanceId && (

@@ -57,6 +57,37 @@ type VolumesQueryData = {
   error: string | null;
 };
 
+type TimelineData = {
+  instanceId: string;
+  region: string | null;
+  launchTime: string | null;
+  currentState: string | null;
+  statusChecks: {
+    system: string | null;
+    instance: string | null;
+  };
+  scheduledEvents: Array<{
+    type: "scheduled-event";
+    code: string | null;
+    description: string | null;
+    notBefore: string | null;
+    notAfter: string | null;
+    notBeforeDeadline: string | null;
+  }>;
+  actionHistory: Array<{
+    id: number;
+    type: "action";
+    action: string;
+    status: "requested" | "success" | "failed";
+    message: string | null;
+    actorUsername: string | null;
+    actorRole: "admin" | "user" | null;
+    region: string | null;
+    createdAt: string;
+    metadata: { targetCount?: number } | null;
+  }>;
+};
+
 function formatDateTime(value?: string) {
   if (!value) return "-";
   const date = new Date(value);
@@ -146,6 +177,19 @@ export function InstanceDetail({
     queryKey: ["ec2-sgs", instance.InstanceId, region, sgIds.join(",")],
     queryFn: () => Promise.resolve({ groups: [], error: null }), // TODO: implement API
     enabled: false, // sgIds.length > 0,
+  });
+
+  const timelineQuery = useQuery<TimelineData>({
+    queryKey: ["ec2-timeline", instance.InstanceId, region],
+    queryFn: async () => {
+      const res = await fetch(`/api/ec2/timeline?instanceId=${instance.InstanceId}&region=${region ?? ""}`);
+      if (res.status === 401) {
+        router.replace("/login");
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load timeline.");
+      return data;
+    },
   });
 
   return (
@@ -267,6 +311,7 @@ export function InstanceDetail({
             {[
               ["details", "Details"],
               ["status", "Status and alarms"],
+              ["timeline", "Timeline"],
               ["monitoring", "Monitoring"],
               ["security", "Security"],
               ["networking", "Networking"],
@@ -462,6 +507,94 @@ export function InstanceDetail({
             </Section>
             <Section title="Metrics">
               <MetricsCharts instanceId={instance.InstanceId} region={region} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="timeline" className="mt-0">
+            <Section title="Lifecycle overview">
+              <FieldGrid>
+                <Field label="Launch time" value={formatDateTime(timelineQuery.data?.launchTime ?? undefined)} />
+                <Field label="Current state" value={timelineQuery.data?.currentState ?? instance.State} />
+                <Field label="System status check" value={timelineQuery.data?.statusChecks?.system ?? "–"} />
+                <Field label="Instance status check" value={timelineQuery.data?.statusChecks?.instance ?? "–"} />
+              </FieldGrid>
+            </Section>
+            <Section title="Action history">
+              {timelineQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading action history…</p>
+              ) : timelineQuery.error ? (
+                <p className="text-sm text-destructive">
+                  {timelineQuery.error instanceof Error ? timelineQuery.error.message : "Failed to load action history."}
+                </p>
+              ) : timelineQuery.data?.actionHistory?.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Time</TableHead>
+                      <TableHead>Action</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actor</TableHead>
+                      <TableHead>Details</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {timelineQuery.data.actionHistory.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>{formatDateTime(item.createdAt)}</TableCell>
+                        <TableCell className="uppercase">{item.action}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              item.status === "success"
+                                ? "default"
+                                : item.status === "failed"
+                                  ? "destructive"
+                                  : "secondary"
+                            }
+                          >
+                            {item.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {item.actorUsername ? `${item.actorUsername}${item.actorRole ? ` (${item.actorRole})` : ""}` : "System"}
+                        </TableCell>
+                        <TableCell>
+                          {item.message || "–"}
+                          {item.metadata?.targetCount ? ` · targets: ${item.metadata.targetCount}` : ""}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground">No action history found.</p>
+              )}
+            </Section>
+            <Section title="Scheduled events">
+              {timelineQuery.data?.scheduledEvents?.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Code</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Not before</TableHead>
+                      <TableHead>Not after</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {timelineQuery.data.scheduledEvents.map((item, idx) => (
+                      <TableRow key={`${item.code}-${item.notBefore}-${idx}`}>
+                        <TableCell>{item.code ?? "–"}</TableCell>
+                        <TableCell>{item.description ?? "–"}</TableCell>
+                        <TableCell>{formatDateTime(item.notBefore ?? undefined)}</TableCell>
+                        <TableCell>{formatDateTime(item.notAfter ?? undefined)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground">No scheduled lifecycle events.</p>
+              )}
             </Section>
           </TabsContent>
 

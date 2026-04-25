@@ -20,6 +20,8 @@ Instance Inspector is a Next.js App Router project to monitor and manage EC2 ins
   - Credentials loaded from external API or environment
   - EC2 and CloudWatch clients created server-side
   - Region-aware APIs
+  - Lifecycle timeline API for launch/state/events/action history
+  - Export reports in CSV or JSON with security posture hints
 - **Encryption System**
   - `src/lib/crypto.ts` provides `encrypt(text)` and `decrypt(encryptedText)`
   - Uses Node.js `crypto`, AES-256-GCM, random IV, authentication tag
@@ -90,6 +92,39 @@ These are decrypted server-side only.
 - Decrypt failures return safe errors and do not leak key material.
 - Expired encrypted tokens are rejected.
 - Existing EC2 APIs continue to avoid sending secrets to frontend.
+
+## New Client-Facing Features
+
+### 1) Instance Lifecycle Timeline
+
+- New route: `GET /api/ec2/timeline?instanceId=<id>&region=<region>`
+- Timeline includes:
+  - Launch time and current state
+  - Status checks snapshot (system/instance)
+  - Scheduled AWS events
+  - Action history logs (`requested`, `success`, `failed`) with actor details
+- UI: New **Timeline** tab in instance detail view.
+
+### 2) Export & Reports
+
+- New route: `GET /api/ec2/export?format=csv|json&region=<region>&state=<state>&search=<term>`
+- Supports filtered exports (based on region/state/search)
+- JSON report includes:
+  - `generatedAt`
+  - `summary` by instance state
+  - instance inventory rows
+- CSV report includes:
+  - Inventory fields (ID, name, type, state, AZ, IPs, tags, SGs)
+  - `SecurityPosture` indicators (`PUBLIC_ENDPOINT`, `NO_IAM_ROLE`, `NO_SECURITY_GROUP`, `OK`)
+- UI: Added **Export CSV** and **Export JSON** controls.
+
+### 3) Action Audit Logging
+
+- Actions from `/api/ec2/actions` are now logged per instance in SQLite:
+  - `requested` before AWS call
+  - `success` on accepted AWS request
+  - `failed` when AWS action errors
+- Table: `instance_action_logs` (auto-migrated on startup).
 
 ## Required Environment Variables
 

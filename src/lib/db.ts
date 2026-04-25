@@ -13,6 +13,22 @@ export type DbUser = {
   createdAt: string;
 };
 
+export type InstanceActionStatus = "requested" | "success" | "failed";
+
+export type InstanceActionLog = {
+  id: number;
+  instanceId: string;
+  region: string | null;
+  action: string;
+  actorUserId: number | null;
+  actorUsername: string | null;
+  actorRole: UserRole | null;
+  status: InstanceActionStatus;
+  message: string | null;
+  metadataJson: string | null;
+  createdAt: string;
+};
+
 let dbInstance: Database.Database | null = null;
 const PASSWORD_SALT_ROUNDS = 12;
 
@@ -31,6 +47,27 @@ function runMigrations(db: Database.Database) {
       role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS instance_action_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      instanceId TEXT NOT NULL,
+      region TEXT,
+      action TEXT NOT NULL,
+      actorUserId INTEGER,
+      actorUsername TEXT,
+      actorRole TEXT CHECK(actorRole IN ('admin', 'user')),
+      status TEXT NOT NULL CHECK(status IN ('requested', 'success', 'failed')),
+      message TEXT,
+      metadataJson TEXT,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_instance_action_logs_instance_created
+    ON instance_action_logs(instanceId, createdAt DESC);
   `);
 
   const adminCount = db
@@ -80,4 +117,59 @@ export function createUser(username: string, password: string, role: UserRole) {
 
 export function deleteUserById(id: number) {
   return getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
+}
+
+export function createInstanceActionLog(input: {
+  instanceId: string;
+  region?: string | null;
+  action: string;
+  actorUserId?: number | null;
+  actorUsername?: string | null;
+  actorRole?: UserRole | null;
+  status: InstanceActionStatus;
+  message?: string | null;
+  metadataJson?: string | null;
+}) {
+  const res = getDb()
+    .prepare(
+      `INSERT INTO instance_action_logs (
+        instanceId, region, action, actorUserId, actorUsername, actorRole, status, message, metadataJson
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.instanceId,
+      input.region ?? null,
+      input.action,
+      input.actorUserId ?? null,
+      input.actorUsername ?? null,
+      input.actorRole ?? null,
+      input.status,
+      input.message ?? null,
+      input.metadataJson ?? null,
+    );
+  return Number(res.lastInsertRowid);
+}
+
+export function listInstanceActionLogs(instanceId: string, region?: string | null, limit = 100) {
+  const cap = Math.max(1, Math.min(500, limit));
+  if (region) {
+    return getDb()
+      .prepare(
+        `SELECT id, instanceId, region, action, actorUserId, actorUsername, actorRole, status, message, metadataJson, createdAt
+         FROM instance_action_logs
+         WHERE instanceId = ? AND region = ?
+         ORDER BY datetime(createdAt) DESC, id DESC
+         LIMIT ?`,
+      )
+      .all(instanceId, region, cap) as InstanceActionLog[];
+  }
+  return getDb()
+    .prepare(
+      `SELECT id, instanceId, region, action, actorUserId, actorUsername, actorRole, status, message, metadataJson, createdAt
+       FROM instance_action_logs
+       WHERE instanceId = ?
+       ORDER BY datetime(createdAt) DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(instanceId, cap) as InstanceActionLog[];
 }
