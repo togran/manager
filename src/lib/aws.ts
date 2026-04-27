@@ -1,5 +1,6 @@
 import { CloudWatchClient } from "@aws-sdk/client-cloudwatch";
 import { EC2Client } from "@aws-sdk/client-ec2";
+import { SSMClient } from "@aws-sdk/client-ssm";
 import type { UserRole } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { assertRole } from "@/lib/roles";
@@ -160,6 +161,19 @@ export async function createCloudWatchClient(role: UserRole, region?: string | n
   const credentials = await getAwsCredentials(role);
   const resolvedRegion = region || credentials.region || getDefaultRegion();
   return new CloudWatchClient({
+    region: resolvedRegion,
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
+    },
+  });
+}
+
+export async function createSsmClient(role: UserRole, region?: string | null) {
+  const credentials = await getAwsCredentials(role);
+  const resolvedRegion = region || credentials.region || getDefaultRegion();
+  return new SSMClient({
     region: resolvedRegion,
     credentials: {
       accessKeyId: credentials.accessKeyId,

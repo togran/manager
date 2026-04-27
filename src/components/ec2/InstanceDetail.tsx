@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -88,11 +88,43 @@ type TimelineData = {
   }>;
 };
 
+type SsmReadinessData = {
+  instanceId: string;
+  region: string | null;
+  canConnect: boolean;
+  readiness: "Can connect" | "Cannot connect";
+  checks: {
+    hasIamRole: boolean;
+    isRunning: boolean;
+    isManagedBySsm: boolean;
+    pingStatus: string;
+    platformType: string | null;
+    lastPingDateTime: string | null;
+  };
+  reasons: string[];
+  error: string | null;
+};
+
 function formatDateTime(value?: string) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+type SecuritySeverity = "high" | "medium" | "low";
+
+type SecurityFinding = {
+  id: string;
+  title: string;
+  detail: string;
+  severity: SecuritySeverity;
+};
+
+function getSeverityBadgeVariant(severity: SecuritySeverity): "default" | "secondary" | "destructive" {
+  if (severity === "high") return "destructive";
+  if (severity === "medium") return "secondary";
+  return "default";
 }
 
 export function InstanceDetail({
@@ -193,6 +225,108 @@ export function InstanceDetail({
       return data;
     },
     enabled: role === "admin",
+  });
+
+  const securityFindings = useMemo<SecurityFinding[]>(() => {
+    const findings: SecurityFinding[] = [];
+    const hasPublicIp = !!instance.PublicIpAddress;
+    const hasIamRole = !!instance.IamInstanceProfile;
+    const hasSecurityGroups = instance.SecurityGroups.length > 0;
+    const blockDevices = instance.BlockDeviceMappings ?? [];
+    const hasUnencryptedVolume = blockDevices.some((b) => b.Encrypted === false);
+    const hasUnknownEncryption = blockDevices.some((b) => b.Encrypted === undefined);
+    const hasDetailedMonitoring = instance.Monitoring === "enabled";
+
+    if (hasPublicIp) {
+      findings.push({
+        id: "public-ip",
+        title: "Public network exposure",
+        detail: `Instance has a public IP (${instance.PublicIpAddress}). Verify internet exposure and ingress controls.`,
+        severity: "medium",
+      });
+    }
+
+    if (!hasIamRole) {
+      findings.push({
+        id: "missing-iam-role",
+        title: "Missing IAM instance profile",
+        detail: "No IAM role/profile attached. This can break least-privilege access patterns and SSM workflows.",
+        severity: "high",
+      });
+    }
+
+    if (!hasSecurityGroups) {
+      findings.push({
+        id: "missing-sg",
+        title: "No security groups attached",
+        detail: "No security group was found. Confirm this instance is not unintentionally exposed.",
+        severity: "high",
+      });
+    }
+
+    if (hasUnencryptedVolume) {
+      findings.push({
+        id: "unencrypted-volume",
+        title: "Unencrypted EBS volume detected",
+        detail: "One or more attached block devices are marked as unencrypted.",
+        severity: "high",
+      });
+    } else if (hasUnknownEncryption && blockDevices.length > 0) {
+      findings.push({
+        id: "unknown-volume-encryption",
+        title: "Volume encryption not fully visible",
+        detail: "Some block devices do not report encryption state in current payload. Validate EBS encryption settings.",
+        severity: "low",
+      });
+    }
+
+    if (!hasDetailedMonitoring) {
+      findings.push({
+        id: "basic-monitoring-only",
+        title: "Only basic monitoring enabled",
+        detail: "Detailed monitoring is disabled. Security and incident signals may have reduced granularity.",
+        severity: "low",
+      });
+    }
+
+    if (findings.length === 0) {
+      findings.push({
+        id: "no-issues",
+        title: "No critical security signals detected",
+        detail: "Current instance metadata does not show obvious high-risk security findings.",
+        severity: "low",
+      });
+    }
+
+    return findings;
+  }, [instance]);
+
+  const securitySummary = useMemo(() => {
+    const high = securityFindings.filter((f) => f.severity === "high").length;
+    const medium = securityFindings.filter((f) => f.severity === "medium").length;
+    const low = securityFindings.filter((f) => f.severity === "low").length;
+    // Keep scoring realistic but less punitive for typical infra setups.
+    const score = Math.max(0, 100 - high * 20 - medium * 10 - low * 3);
+    return { high, medium, low, score };
+  }, [securityFindings]);
+
+  const ssmReadinessQuery = useQuery<SsmReadinessData>({
+    queryKey: ["ec2-ssm-readiness", instance.InstanceId, region, instance.State, instance.IamInstanceProfile],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        instanceId: instance.InstanceId,
+        region: region ?? "",
+        instanceState: instance.State,
+        iamRoleArn: instance.IamInstanceProfile ?? "",
+      });
+      const res = await fetch(`/api/ec2/ssm-readiness?${params.toString()}`);
+      if (res.status === 401) {
+        router.replace("/login");
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load SSM readiness.");
+      return data;
+    },
   });
 
   function handleTabChange(nextTab: string) {
@@ -612,12 +746,81 @@ export function InstanceDetail({
           </TabsContent>
 
           <TabsContent value="security" className="mt-0">
+            <Section title="Security posture summary">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+                <div className="rounded-lg border border-border bg-white p-4 dark:bg-slate-900">
+                  <div className="text-xs text-muted-foreground">Posture score</div>
+                  <div className="mt-1 text-2xl font-bold">{securitySummary.score}/100</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Derived from IAM, network exposure, volume encryption, and monitoring metadata.
+                  </div>
+                </div>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-900/20">
+                  <div className="text-xs text-red-700 dark:text-red-300">High findings</div>
+                  <div className="mt-1 text-2xl font-bold text-red-700 dark:text-red-300">{securitySummary.high}</div>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-900/20">
+                  <div className="text-xs text-amber-700 dark:text-amber-300">Medium findings</div>
+                  <div className="mt-1 text-2xl font-bold text-amber-700 dark:text-amber-300">{securitySummary.medium}</div>
+                </div>
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/40 dark:bg-blue-900/20">
+                  <div className="text-xs text-blue-700 dark:text-blue-300">Low findings</div>
+                  <div className="mt-1 text-2xl font-bold text-blue-700 dark:text-blue-300">{securitySummary.low}</div>
+                </div>
+              </div>
+            </Section>
+            <Section title="Key security findings">
+              <div className="space-y-3">
+                {securityFindings.map((finding) => (
+                  <div key={finding.id} className="rounded-lg border border-border bg-white p-4 dark:bg-slate-900">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold">{finding.title}</div>
+                      <Badge variant={getSeverityBadgeVariant(finding.severity)} className="uppercase">
+                        {finding.severity}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">{finding.detail}</div>
+                  </div>
+                ))}
+              </div>
+            </Section>
             <Section title="Security details">
               <FieldGrid>
                 <Field label="IAM Role" value={instance.IamInstanceProfile} />
                 <Field label="Owner" value={null} />
                 <Field label="Launch time" value={instance.LaunchTime} />
+                <Field label="Public endpoint" value={instance.PublicIpAddress ? "Yes" : "No"} />
+                <Field label="Security groups attached" value={String(instance.SecurityGroups.length)} />
+                <Field label="Detailed monitoring" value={instance.Monitoring === "enabled" ? "Enabled" : "Disabled"} />
               </FieldGrid>
+            </Section>
+            <Section title="Storage encryption">
+              {instance.BlockDeviceMappings.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Device</TableHead>
+                      <TableHead>Volume ID</TableHead>
+                      <TableHead>Encrypted</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {instance.BlockDeviceMappings.map((b, idx) => (
+                      <TableRow key={b.VolumeId || `enc-${idx}`}>
+                        <TableCell className="font-mono">{b.DeviceName || "–"}</TableCell>
+                        <TableCell className="font-mono">{b.VolumeId || "–"}</TableCell>
+                        <TableCell>
+                          {b.Encrypted === true ? "Yes" : b.Encrypted === false ? "No" : "Unknown"}
+                        </TableCell>
+                        <TableCell>{b.Status || "–"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground">No block device mapping found.</p>
+              )}
             </Section>
             <Section title="Security groups">
               {instance.SecurityGroups.length ? (
@@ -659,10 +862,63 @@ export function InstanceDetail({
                 error={sgQuery.data?.error}
               />
             </Section>
+            <Section title="Recommended hardening actions">
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>1. Attach least-privilege IAM role (and SSM managed policy if remote shell is needed).</p>
+                <p>2. Minimize public exposure; prefer private subnets + controlled ingress.</p>
+                <p>3. Ensure all EBS volumes are encrypted with KMS-managed keys.</p>
+                <p>4. Keep security groups restrictive and review inbound ports regularly.</p>
+                <p>5. Enable detailed monitoring and forward logs to centralized observability.</p>
+              </div>
+            </Section>
           </TabsContent>
 
 
           <TabsContent value="networking" className="mt-0">
+            <Section title="SSM connect readiness">
+              {ssmReadinessQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Checking SSM readiness…</p>
+              ) : ssmReadinessQuery.error ? (
+                <p className="text-sm text-destructive">
+                  {ssmReadinessQuery.error instanceof Error
+                    ? ssmReadinessQuery.error.message
+                    : "Failed to check SSM readiness."}
+                </p>
+              ) : ssmReadinessQuery.data ? (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <Badge variant={ssmReadinessQuery.data.canConnect ? "default" : "destructive"}>
+                      {ssmReadinessQuery.data.readiness}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      Ping: {ssmReadinessQuery.data.checks.pingStatus}
+                    </span>
+                  </div>
+                  <FieldGrid>
+                    <Field label="IAM role attached" value={ssmReadinessQuery.data.checks.hasIamRole ? "Yes" : "No"} />
+                    <Field label="Instance running" value={ssmReadinessQuery.data.checks.isRunning ? "Yes" : "No"} />
+                    <Field label="Managed by SSM" value={ssmReadinessQuery.data.checks.isManagedBySsm ? "Yes" : "No"} />
+                    <Field label="Platform type" value={ssmReadinessQuery.data.checks.platformType ?? "–"} />
+                    <Field
+                      label="Last SSM ping"
+                      value={ssmReadinessQuery.data.checks.lastPingDateTime ? formatDateTime(ssmReadinessQuery.data.checks.lastPingDateTime) : "–"}
+                    />
+                  </FieldGrid>
+                  {!ssmReadinessQuery.data.canConnect && ssmReadinessQuery.data.reasons.length > 0 && (
+                    <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-200">
+                      <div className="mb-1 font-medium">Connection blockers</div>
+                      <ul className="list-disc space-y-1 pl-4">
+                        {ssmReadinessQuery.data.reasons.map((reason, idx) => (
+                          <li key={`${reason}-${idx}`}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No SSM readiness data.</p>
+              )}
+            </Section>
             <Section title="Networking details">
               <FieldGrid>
                 <Field label="Public IPv4 address" value={instance.PublicIpAddress} />
