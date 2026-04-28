@@ -9,15 +9,16 @@ lerna-debug.log*
 
 node_modules
 dist
+data
 .next
 dist-ssr
+package-lock.json
 .output
 .vinxi
 .tanstack/**
 .nitro
 *.local
 .env
-package-lock.json
 
 # Wrangler / Cloudflare
 .wrangler/
