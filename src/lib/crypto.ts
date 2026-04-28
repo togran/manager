@@ -1,8 +1,7 @@
 import "server-only";
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
+import { createDecipheriv, createHash } from "crypto";
 
 const AES_ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 12;
 const ENCRYPTED_VALUE_PARTS = 4;
 const ENCRYPTED_VALUE_PARTS_WITH_TIMESTAMP = 5;
 const ENCRYPTED_VALUE_VERSION = "v1";
@@ -10,20 +9,8 @@ const DEFAULT_TOKEN_MAX_AGE_SECONDS = 900;
 
 export type EncryptedText = string;
 
-function toBase64Url(value: Buffer) {
-  return value.toString("base64url");
-}
-
 function fromBase64Url(value: string) {
   return Buffer.from(value, "base64url");
-}
-
-function getEncryptionSecret() {
-  const secret = process.env.ENCRYPTION_SECRET?.trim();
-  if (!secret) {
-    throw new Error("ENCRYPTION_SECRET is not configured");
-  }
-  return secret;
 }
 
 function deriveKey(secret: string) {
@@ -35,16 +22,6 @@ function getMaxAgeSeconds() {
   if (!raw) return DEFAULT_TOKEN_MAX_AGE_SECONDS;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TOKEN_MAX_AGE_SECONDS;
-}
-
-function toEncryptedPayload(iv: Buffer, tag: Buffer, encrypted: Buffer, issuedAt: number) {
-  return [
-    ENCRYPTED_VALUE_VERSION,
-    toBase64Url(iv),
-    toBase64Url(tag),
-    String(issuedAt),
-    toBase64Url(encrypted),
-  ].join(".");
 }
 
 function parseEncryptedPayload(encryptedText: string) {
@@ -82,21 +59,11 @@ function assertNotExpired(issuedAt: number | null) {
   }
 }
 
-export function encrypt(text: string): EncryptedText {
-  const iv = randomBytes(IV_LENGTH);
-  const key = deriveKey(getEncryptionSecret());
-  const cipher = createCipheriv(AES_ALGORITHM, key, iv);
-  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  const issuedAt = Math.floor(Date.now() / 1000);
-  return toEncryptedPayload(iv, tag, encrypted, issuedAt);
-}
-
-export function decrypt(encryptedText: EncryptedText): string {
+export function decrypt(encryptedText: EncryptedText, secret: string): string {
   try {
     const { iv, tag, content, issuedAt } = parseEncryptedPayload(encryptedText);
     assertNotExpired(issuedAt);
-    const key = deriveKey(getEncryptionSecret());
+    const key = deriveKey(secret);
     const decipher = createDecipheriv(AES_ALGORITHM, key, fromBase64Url(iv));
     decipher.setAuthTag(fromBase64Url(tag));
     const decrypted = Buffer.concat([decipher.update(fromBase64Url(content)), decipher.final()]);

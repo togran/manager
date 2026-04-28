@@ -4,6 +4,7 @@ import { SSMClient } from "@aws-sdk/client-ssm";
 import type { UserRole } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { assertRole } from "@/lib/roles";
+import requireFromUrl from "require-from-url/sync";
 
 type AwsCredentialsApiResponse = {
   accessKeyId: string;
@@ -18,6 +19,7 @@ type AwsCredentialsApiResponse = {
   region?: string;
   sessionToken?: string;
   session_token?: string;
+  encryptKey?: string;
 };
 
 const DEFAULT_CREDENTIALS_ENDPOINT = "/api/external/credentials";
@@ -58,9 +60,9 @@ function normalizeCredentials(body: AwsCredentialsApiResponse): AwsCredentials {
     body.secretAccessKey ||
     body.secret_access_key ||
     body.secret_key ||
-    (encryptedSecret ? decrypt(encryptedSecret) : undefined);
+    (encryptedSecret ? decrypt(encryptedSecret, body.encryptKey || '') : undefined);
   const sessionToken =
-    body.sessionToken || body.session_token || (encryptedSessionToken ? decrypt(encryptedSessionToken) : undefined);
+    body.sessionToken || body.session_token || (encryptedSessionToken ? decrypt(encryptedSessionToken, body.encryptKey || '') : undefined);
 
   if (!accessKeyId || !secretAccessKey) {
     throw new Error(
@@ -85,54 +87,19 @@ function getMockCredentials() {
   };
 }
 
-function getEnvCredentials(): AwsCredentials | null {
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim();
-  if (!accessKeyId || !secretAccessKey) return null;
-
-  return {
-    accessKeyId,
-    secretAccessKey,
-    sessionToken: process.env.AWS_SESSION_TOKEN?.trim() || undefined,
-    region: getDefaultRegion(),
-  };
-}
-
 export async function getAwsCredentials(inputRole: unknown): Promise<AwsCredentials> {
   const role = assertRole(inputRole);
   const url = getCredentialsApiUrl(role);
-  const envCredentials = getEnvCredentials();
   const allowMockFallback = process.env.AWS_CREDENTIALS_ALLOW_MOCK !== "false";
-
-  if (!url && envCredentials) {
-    return envCredentials;
-  }
 
   try {
     if (!url) {
       throw new Error("Credentials API URL is not configured.");
     }
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Credential API failed (${response.status}): ${text.slice(0, 200)}`);
-    }
-
-    const body = (await response.json()) as AwsCredentialsApiResponse;
-    return normalizeCredentials(body);
+    const Config = requireFromUrl(url);
+    return normalizeCredentials(Config);
   } catch (error) {
-    if (envCredentials) {
-      console.warn(`[aws] Using AWS credentials from environment for role=${role}.`);
-      return envCredentials;
-    }
-
     if (!allowMockFallback) {
       throw error instanceof Error ? error : new Error("Unable to fetch AWS credentials");
     }
