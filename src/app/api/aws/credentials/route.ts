@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/auth";
-import { encrypt } from "@/lib/crypto";
+import { decrypt } from "@/lib/crypto";
 import { getAwsCredentials } from "@/lib/aws";
 
 type EncryptedCredentialsResponse = {
@@ -18,12 +18,12 @@ export async function GET(request: NextRequest) {
     const credentials = await getAwsCredentials(auth.session.role);
     const payload: EncryptedCredentialsResponse = {
       accessKeyId: credentials.accessKeyId,
-      encryptedSecretAccessKey: encrypt(credentials.secretAccessKey),
+      encryptedSecretAccessKey: decrypt(credentials.secretAccessKey, ''),
       region: credentials.region,
     };
 
     if (credentials.sessionToken) {
-      payload.encryptedSessionToken = encrypt(credentials.sessionToken);
+      payload.encryptedSessionToken = decrypt(credentials.sessionToken, '');
     }
 
     return NextResponse.json(payload, { status: 200 });
