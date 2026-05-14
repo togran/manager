@@ -14,6 +14,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Field, FieldGrid } from "./Field";
 import { StateBadge } from "./StateBadge";
 import { MetricsCharts } from "./MetricsCharts";
@@ -54,6 +56,53 @@ type VolumesQueryData = {
     Encrypted?: boolean;
     State?: string;
   }>;
+  error: string | null;
+};
+
+type NodeExporterFilesystem = {
+  mountpoint: string;
+  device: string;
+  fstype: string;
+  sizeBytes: number;
+  freeBytes: number;
+  freeInodes: number;
+};
+
+type NodeExporterHostMetrics = {
+  load1: number;
+  load5: number;
+  load15: number;
+  memoryTotalBytes: number;
+  memoryFreeBytes: number;
+  memoryAvailableBytes: number;
+  swapTotalBytes: number;
+  swapFreeBytes: number;
+  bootTimeSeconds: number;
+  uptimeSeconds: number;
+  os: {
+    sysname: string;
+    release: string;
+    version: string;
+    machine: string;
+  } | null;
+  diskIo: {
+    readIops: number;
+    writeIops: number;
+  };
+  network: {
+    receiveBytesPerSecond: number;
+    transmitBytesPerSecond: number;
+    history: Array<{
+      timestamp: string;
+      receiveBytesPerSecond: number;
+      transmitBytesPerSecond: number;
+    }>;
+  };
+};
+
+type NodeExporterFilesystemsData = {
+  filesystems: NodeExporterFilesystem[];
+  host: NodeExporterHostMetrics | null;
   error: string | null;
 };
 
@@ -112,6 +161,37 @@ function formatDateTime(value?: string) {
   return date.toLocaleString();
 }
 
+function formatBytes(bytes: number) {
+  if (bytes < 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
+function formatBytesPerSecond(bytes: number) {
+  const floored = Math.max(0, Math.floor(bytes));
+  if (floored < 1024) return `${floored} B/s`;
+  if (floored < 1024 ** 2) return `${Math.floor(floored / 1024)} KiB/s`;
+  return `${Math.floor(floored / (1024 ** 2))} MiB/s`;
+}
+
+function formatDuration(totalSeconds: number) {
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return "-";
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const parts = [] as string[];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes || parts.length === 0) parts.push(`${minutes}m`);
+  return parts.join(" ");
+}
+
+function formatPercent(value: number) {
+  return `${value.toFixed(1)}%`;
+}
+
 type SecuritySeverity = "high" | "medium" | "low";
 
 type SecurityFinding = {
@@ -141,6 +221,7 @@ export function InstanceDetail({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("details");
+  const [showAllFilesystems, setShowAllFilesystems] = useState(false);
   const adminOnlyMessage = "Only admin can use this feature.";
 
   async function runInstanceAction(action: "start" | "stop" | "reboot" | "terminate") {
@@ -204,6 +285,39 @@ export function InstanceDetail({
     queryFn: () => Promise.resolve({ volumes: [], error: null }), // TODO: implement API
     enabled: false, // volumeIds.length > 0,
   });
+
+  const nodeExporterQuery = useQuery<NodeExporterFilesystemsData>({
+    queryKey: ["node-exporter-filesystems", instance.PrivateIpAddress],
+    queryFn: async () => {
+      if (!instance.PrivateIpAddress) {
+        return { filesystems: [], host: null, error: "No internal IP available." };
+      }
+      const res = await fetch(`/api/ec2/node-exporter?ip=${encodeURIComponent(instance.PrivateIpAddress)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error ?? "Failed to load filesystem metrics.");
+      }
+      return data;
+    },
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+    enabled: !!instance.PrivateIpAddress,
+  });
+
+  const filteredFilesystems = nodeExporterQuery.data?.filesystems.filter((fs: NodeExporterFilesystem) => {
+    if (showAllFilesystems) return true;
+    const excludedFs = /^(tmpfs|overlay|squashfs|ramfs|nsfs|autofs|proc|sysfs)$/;
+    const excludedMount = /^(\/run.*|\/var\/lib\/docker.*|\/snap.*|\/boot.*)$/;
+    return !excludedFs.test(fs.fstype) && !excludedMount.test(fs.mountpoint);
+  }) ?? [];
+
+  const hostMetrics = nodeExporterQuery.data?.host ?? null;
+  const memoryUsedPercent = hostMetrics?.memoryTotalBytes
+    ? ((hostMetrics.memoryTotalBytes - hostMetrics.memoryAvailableBytes) / hostMetrics.memoryTotalBytes) * 100
+    : 0;
+  const swapUsedPercent = hostMetrics?.swapTotalBytes
+    ? ((hostMetrics.swapTotalBytes - hostMetrics.swapFreeBytes) / hostMetrics.swapTotalBytes) * 100
+    : 0;
 
   // const describeSgFn = useServerFn(describeSecurityGroups);
   const sgIds = instance.SecurityGroups.map((g) => g.GroupId);
@@ -597,6 +711,26 @@ export function InstanceDetail({
                 <Field label="Threads per core" value={instance.CpuThreadsPerCore} />
               </FieldGrid>
             </Section>
+            <Section title="Host details">
+              {nodeExporterQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading host details…</p>
+              ) : hostMetrics ? (
+                <FieldGrid>
+                  <Field
+                    label="Operating system"
+                    value={hostMetrics.os ? `${hostMetrics.os.sysname} ${hostMetrics.os.release} (${hostMetrics.os.machine})` : "-"}
+                  />
+                  <Field label="Kernel version" value={hostMetrics.os?.version || "-"} />
+                  <Field label="Uptime" value={formatDuration(hostMetrics.uptimeSeconds)} />
+                  <Field
+                    label="Boot time"
+                    value={hostMetrics.bootTimeSeconds ? formatDateTime(new Date(hostMetrics.bootTimeSeconds * 1000).toISOString()) : "-"}
+                  />
+                </FieldGrid>
+              ) : (
+                <p className="text-sm text-muted-foreground">Host details are unavailable.</p>
+              )}
+            </Section>
           </TabsContent>
 
           <TabsContent value="status" className="mt-0">
@@ -654,6 +788,51 @@ export function InstanceDetail({
             </Section>
             <Section title="Metrics">
               <MetricsCharts instanceId={instance.InstanceId} region={region} />
+            </Section>
+            <Section title="Host load and memory">
+              {nodeExporterQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading host metrics…</p>
+              ) : hostMetrics ? (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border border-border bg-panel p-4">
+                    <div className="text-xs text-muted-foreground">Load average</div>
+                    <div className="mt-2 text-lg font-semibold text-foreground">
+                      {hostMetrics.load1.toFixed(2)} / {hostMetrics.load5.toFixed(2)} / {hostMetrics.load15.toFixed(2)}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">1 / 5 / 15 min</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-panel p-4">
+                    <div className="text-xs text-muted-foreground">Memory used</div>
+                    <div className="mt-2 text-lg font-semibold text-foreground">{formatPercent(memoryUsedPercent)}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {formatBytes(hostMetrics.memoryAvailableBytes)} available of {formatBytes(hostMetrics.memoryTotalBytes)}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      Free only: {formatBytes(hostMetrics.memoryFreeBytes)}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-panel p-4">
+                    <div className="text-xs text-muted-foreground">Swap used</div>
+                    <div className="mt-2 text-lg font-semibold text-foreground">
+                      {hostMetrics.swapTotalBytes > 0 ? formatPercent(swapUsedPercent) : "No swap"}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {hostMetrics.swapTotalBytes > 0
+                        ? `${formatBytes(hostMetrics.swapFreeBytes)} free of ${formatBytes(hostMetrics.swapTotalBytes)}`
+                        : "Swap is not configured on this host."}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-panel p-4">
+                    <div className="text-xs text-muted-foreground">Disk IOPS</div>
+                    <div className="mt-2 text-lg font-semibold text-foreground">
+                      {hostMetrics.diskIo.readIops.toFixed(1)} / {hostMetrics.diskIo.writeIops.toFixed(1)}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">read / write per second</div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Host metrics are unavailable.</p>
+              )}
             </Section>
           </TabsContent>
 
@@ -930,6 +1109,46 @@ export function InstanceDetail({
                 <Field label="Availability Zone" value={instance.AvailabilityZone} />
               </FieldGrid>
             </Section>
+            <Section title="Network throughput">
+              {nodeExporterQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading network metrics…</p>
+              ) : hostMetrics ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-lg border border-border bg-panel p-4">
+                      <div className="text-xs text-muted-foreground">Receive rate</div>
+                      <div className="mt-2 text-lg font-semibold text-foreground">
+                        {formatBytesPerSecond(hostMetrics.network.receiveBytesPerSecond)}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border bg-panel p-4">
+                      <div className="text-xs text-muted-foreground">Transmit rate</div>
+                      <div className="mt-2 text-lg font-semibold text-foreground">
+                        {formatBytesPerSecond(hostMetrics.network.transmitBytesPerSecond)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-panel p-4">
+                    <div className="mb-2 text-sm font-semibold text-foreground">Recent network speed</div>
+                    {hostMetrics.network.history.length ? (
+                      <div className="space-y-2 text-xs text-muted-foreground">
+                        {hostMetrics.network.history.slice(-6).map((point) => (
+                          <div key={point.timestamp} className="flex items-center justify-between gap-4">
+                            <span>{new Date(point.timestamp).toLocaleTimeString()}</span>
+                            <span>↓ {formatBytesPerSecond(point.receiveBytesPerSecond)}</span>
+                            <span>↑ {formatBytesPerSecond(point.transmitBytesPerSecond)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Waiting for enough samples to calculate throughput.</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Network metrics are unavailable.</p>
+              )}
+            </Section>
             <Section title="Network interfaces">
               {instance.NetworkInterfaces.length ? (
                 <Table>
@@ -1012,6 +1231,55 @@ export function InstanceDetail({
               )}
               {volumesQuery.data?.error && (
                 <p className="mt-2 text-xs text-destructive">{volumesQuery.data.error}</p>
+              )}
+            </Section>
+            <Section title="File systems">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-muted-foreground">
+                  Filesystem metrics from node_exporter on the instance.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    checked={showAllFilesystems}
+                    onCheckedChange={(checked) => setShowAllFilesystems(Boolean(checked))}
+                    id="show-all-filesystems"
+                  />
+                  <Label htmlFor="show-all-filesystems" className="text-sm">
+                    Show all
+                  </Label>
+                </div>
+              </div>
+              {nodeExporterQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading file system metrics…</p>
+              ) : nodeExporterQuery.error ? (
+                <p className="text-sm text-destructive">{(nodeExporterQuery.error as Error).message}</p>
+              ) : filteredFilesystems.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Mountpoint</TableHead>
+                      <TableHead>Device</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead>Free space</TableHead>
+                      <TableHead>Free inodes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredFilesystems.map((fs) => (
+                      <TableRow key={`${fs.device}-${fs.mountpoint}`}>
+                        <TableCell>{fs.mountpoint}</TableCell>
+                        <TableCell className="font-mono">{fs.device}</TableCell>
+                        <TableCell>{formatBytes(fs.sizeBytes)}</TableCell>
+                        <TableCell>{formatBytes(fs.freeBytes)}</TableCell>
+                        <TableCell>{fs.freeInodes.toLocaleString()}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No filesystem metrics found. Ensure node_exporter is reachable on port 9100 from the server.
+                </p>
               )}
             </Section>
           </TabsContent>

@@ -7,6 +7,7 @@ Instance Inspector is a Next.js App Router application for monitoring and operat
 - EC2 instance inventory with filters, sorting, and quick selection
 - Instance operations (`start`, `stop`, `reboot`, `terminate`) with admin-only authorization
 - CloudWatch metrics for operational visibility
+- node_exporter host metrics for load, memory, swap, disk IOPS, network throughput, uptime, OS details, and filesystem utilization
 - Lifecycle timeline (launch, status checks, scheduled AWS events, action history)
 - CSV/JSON export reports with security posture hints
 - JWT session authentication and role-based access control (`admin` / `user`)
@@ -50,6 +51,7 @@ src/
         instances/                   # inventory
         status/                      # per-instance status checks/events
         metrics/                     # CloudWatch metrics
+        node-exporter/               # host metrics proxy + parser for node_exporter
         actions/                     # start/stop/reboot/terminate
         timeline/                    # lifecycle + action history
         export/                      # CSV/JSON report export
@@ -88,6 +90,7 @@ data/
 - `GET /api/ec2/instances?region=<code>`
 - `GET /api/ec2/status?instanceId=<id>&region=<code>`
 - `GET /api/ec2/metrics?instanceId=<id>&region=<code>`
+- `GET /api/ec2/node-exporter?ip=<private-ip>`
 - `POST /api/ec2/actions` (admin, supports single + bulk instance IDs)
 - `GET /api/ec2/timeline?instanceId=<id>&region=<code>` (admin)
 - `GET /api/ec2/export?format=csv|json&region=<code>&state=<state>&search=<term>` (admin)
@@ -153,6 +156,44 @@ data/
 - Multi-select with bulk operations (admin)
 - Clean selection and refresh behavior
 
+### Host Metrics via node_exporter
+
+- Source: `http://<instance-private-ip>:9100/metrics`
+- Fetched server-side by Next.js API route, never directly from the browser
+- Cached in-memory for 5 seconds per target host
+- Includes lightweight host metrics only:
+  - load averages (`node_load1`, `node_load5`, `node_load15`)
+  - memory total/free/available
+  - swap total/free
+  - disk read/write IOPS rates from node_exporter counters
+  - network receive/transmit speed with short recent history
+  - uptime and OS/kernel details
+  - filesystem size/free/free inode table
+- Filesystem table supports a `Show all` toggle
+- Default filesystem filtering hides noisy mounts:
+  - `fstype!~"tmpfs|overlay|squashfs|ramfs|nsfs|autofs|proc|sysfs"`
+  - `mountpoint!~"/run.*|/var/lib/docker.*|/snap.*|/boot.*"`
+
+### Metrics Placement in UI
+
+- `Details` tab:
+  - OS details
+  - kernel version
+  - uptime
+  - boot time
+- `Monitoring` tab:
+  - CloudWatch charts
+  - load averages
+  - memory usage
+  - swap usage
+  - disk IOPS rate
+- `Networking` tab:
+  - current network receive/transmit throughput
+  - short recent throughput history
+- `Storage` tab:
+  - block devices
+  - filesystem utilization table
+
 ### Lifecycle Timeline
 
 - Launch time + current state snapshot
@@ -205,7 +246,7 @@ MOCK_AWS_REGION=ap-south-1
 npm install
 ```
 
-2. Create local env file
+2. Create environment file
 
 ```bash
 cp .env.example .env
@@ -213,19 +254,79 @@ cp .env.example .env
 
 3. Fill required env values in `.env`
 
-4. Run development server
+4. If you want host metrics from private instance IPs, make those IPs reachable from your local machine.
+
+Example approaches:
+
+- `sshuttle` to route internal subnets through a reachable jump host
+- SSH local forwarding for a specific instance metrics endpoint
+
+Example SSH local port forward:
+
+```bash
+ssh -L 9100:10.0.0.6:9100 user@jump-host
+```
+
+Example `sshuttle` route:
+
+```bash
+sshuttle -r user@jump-host 10.0.0.0/8
+```
+
+5. Run the application locally
 
 ```bash
 npm run dev
 ```
 
-5. Open `http://localhost:3000`
+6. Open `http://localhost:3000`
 
-## Build and Verification
+## Docker Setup
+
+This project is intended to run with Docker Compose.
+
+1. Create environment file
 
 ```bash
-npm run build
+cp .env.example .env
 ```
+
+2. Fill required env values in `.env`
+
+3. Build the application image
+
+```bash
+docker compose build
+```
+
+4. Start the stack
+
+```bash
+docker compose up -d
+```
+
+5. Open `http://localhost:3000`
+
+6. Stop the stack when finished
+
+```bash
+docker compose down
+```
+
+## Docker Notes
+
+- `Dockerfile` uses a multi-stage production build
+- `python3` and `build-essential` are installed only in the build stage for native Node modules such as `better-sqlite3`
+- runtime image stays slimmer and only includes production artifacts
+- `docker-compose.yaml` persists SQLite data in Docker volume `data`
+
+## node_exporter Connectivity Notes
+
+- The app expects node_exporter to be reachable from the Next.js server at `<private-ip>:9100`
+- Browser clients do not connect to node_exporter directly
+- For local non-Docker runs, SSH tunneling or `sshuttle` can be used to reach private instance addresses from your workstation
+- If private AWS addresses are reachable only through a host tunnel (for example `sshuttle`), container networking must allow that path as well
+- Typical deployment expectation is that the app runs in a network context that can reach private instance addresses directly
 
 ## Production Recommendations
 
