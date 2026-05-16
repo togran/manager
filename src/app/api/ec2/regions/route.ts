@@ -32,44 +32,130 @@ const REGIONS = [
 ];
 
 const REGIONS_CACHE_TTL_MS = 60_000; // 60s
-const regionsCache = new Map<string, { expires: number; data: typeof REGIONS }>();
+const regionsCache = new Map<
+  string,
+  { expires: number; data: Array<typeof REGIONS[number] & { instance_num: number }> }
+>();
+
+async function mapWithConcurrency<T, R>(items: T[], mapper: (item: T) => Promise<R>, concurrency = 6): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let idx = 0;
+  async function worker() {
+    while (true) {
+      const i = idx++;
+      if (i >= items.length) break;
+      try {
+        results[i] = await mapper(items[i]);
+      } catch (e) {
+        results[i] = e as unknown as R;
+      }
+    }
+  }
+  const workers = new Array(Math.min(concurrency, items.length)).fill(null).map(() => worker());
+  await Promise.all(workers);
+  return results;
+}
 
 export async function GET(request: NextRequest) {
   const auth = await requireSession(request);
   if (auth.error) return auth.error;
   try {
+    const url = new URL(request.url);
+    const force = url.searchParams.get("force") === "true" || url.searchParams.get("refresh") === "true";
     const cacheKey = `regions-with-instances:${auth.session.role}`;
-    const cached = regionsCache.get(cacheKey);
+    const cached = !force ? regionsCache.get(cacheKey) : undefined;
     if (cached && cached.expires > Date.now()) {
-      return NextResponse.json({ regions: cached.data, default: process.env.AWS_REGION ?? null });
+      return NextResponse.json({ regions: cached.data, default: process.env.AWS_REGION ?? null, cached: true });
     }
 
     const creds = await getAwsCredentials(auth.session.role);
-    const regionsWithInstances: typeof REGIONS = [];
+    const concurrency = 3; // limit concurrent DescribeInstances calls to avoid API throttling
 
-    for (const r of REGIONS) {
+    const presence = await mapWithConcurrency(
+      REGIONS,
+      async (r) => {
+        try {
+          const client = new EC2Client({
+            region: r.code,
+            credentials: {
+              accessKeyId: creds.accessKeyId,
+              secretAccessKey: creds.secretAccessKey,
+              sessionToken: creds.sessionToken,
+            },
+          });
+          const resp = await client.send(new DescribeInstancesCommand({ MaxResults: 5 }));
+          const has = !!resp.Reservations?.some((res) => res.Instances && res.Instances.length > 0);
+          return { region: r, has };
+        } catch {
+          return { region: r, has: false };
+        }
+      },
+      concurrency,
+    );
+
+    const positiveRegions = presence.filter((p) => p.has).map((p) => p.region);
+
+    let targetRegions = positiveRegions;
+    // If no positive regions detected, try the default region as a fallback (some credential
+    // setups only allow access to the default region). This makes the endpoint more forgiving
+    // for local setups where only the default region is accessible.
+    if (targetRegions.length === 0) {
+      const defaultRegion = process.env.AWS_REGION || "ap-south-1";
       try {
         const client = new EC2Client({
-          region: r.code,
+          region: defaultRegion,
           credentials: {
-            accessKeyId: creds.accessKeyId,
-            secretAccessKey: creds.secretAccessKey,
-            sessionToken: creds.sessionToken,
+            accessKeyId: (creds as any).accessKeyId,
+            secretAccessKey: (creds as any).secretAccessKey,
+            sessionToken: (creds as any).sessionToken,
           },
         });
-        const resp = await client.send(new DescribeInstancesCommand({ MaxResults: 1 }));
-        if (resp.Reservations && resp.Reservations.some((res) => res.Instances && res.Instances.length > 0)) {
-          regionsWithInstances.push(r);
-        }
-      } catch (err) {
-        // Ignore per-region errors (permission/region not enabled) and continue
-        continue;
+        const resp = await client.send(new DescribeInstancesCommand({ MaxResults: 5 }));
+        const hasDefault = !!resp.Reservations?.some((res) => res.Instances && res.Instances.length > 0);
+        if (hasDefault) targetRegions = [{ code: defaultRegion, name: defaultRegion, group: defaultRegion } as any];
+      } catch {
+        // ignore
       }
     }
 
-    regionsCache.set(cacheKey, { expires: Date.now() + REGIONS_CACHE_TTL_MS, data: regionsWithInstances });
+    const counts = await mapWithConcurrency(
+      targetRegions,
+      async (r) => {
+        try {
+          const client = new EC2Client({
+            region: r.code,
+            credentials: {
+              accessKeyId: creds.accessKeyId,
+              secretAccessKey: creds.secretAccessKey,
+              sessionToken: creds.sessionToken,
+            },
+          });
 
-    return NextResponse.json({ regions: regionsWithInstances, default: process.env.AWS_REGION ?? null });
+          let nextToken: string | undefined = undefined;
+          let instanceCount = 0;
+          while (true) {
+            const resp = await client.send(new DescribeInstancesCommand({ NextToken: nextToken, MaxResults: 1000 }));
+            if (resp.Reservations) {
+              for (const reservation of resp.Reservations) {
+                if (reservation.Instances) instanceCount += reservation.Instances.length;
+              }
+            }
+            const token = (resp as any).NextToken as string | undefined;
+            if (!token) break;
+            nextToken = token;
+          }
+
+          return { ...r, instance_num: instanceCount };
+        } catch (err) {
+          return { ...r, instance_num: 0 };
+        }
+      },
+      concurrency,
+    );
+
+    regionsCache.set(cacheKey, { expires: Date.now() + REGIONS_CACHE_TTL_MS, data: counts });
+
+    return NextResponse.json({ regions: counts, default: process.env.AWS_REGION ?? null, cached: false });
   } catch (err: unknown) {
     const errorMessage = getFriendlyAwsErrorMessage(err, "Failed to load EC2 regions with instances.");
     return NextResponse.json({ success: false, regions: [], error: errorMessage }, { status: 500 });
